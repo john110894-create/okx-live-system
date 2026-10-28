@@ -183,7 +183,6 @@ html_content = """<!DOCTYPE html>
                     let now = Date.now();
                     let twentyFourHours = 24 * 60 * 60 * 1000;
 
-                    // 清理超過 24 小時的次數統計 (上限改為一天 3 次)
                     Object.keys(alertCounts).forEach(sym => {
                         if (now - alertCounts[sym].lastTime > twentyFourHours) {
                             delete alertCounts[sym];
@@ -194,7 +193,6 @@ html_content = """<!DOCTYPE html>
                         if (now - peak30Signals[sym].timestamp > twentyFourHours * 3) delete peak30Signals[sym];
                     });
 
-                    // 1. 現有追蹤標的邏輯: 檢查最高漲幅是否達 30% 記錄至專區；回檔達 -2.5% 則踢出
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) {
@@ -208,7 +206,6 @@ html_content = """<!DOCTYPE html>
                                 sig.maxGain = currentGain;
                             }
 
-                            // 達到 30% 記錄至超過 30% 飆漲紀錄分頁
                             if (currentGain >= 30.0 && !peak30Signals[sym]) {
                                 peak30Signals[sym] = {
                                     symbol: sym,
@@ -220,7 +217,6 @@ html_content = """<!DOCTYPE html>
                                 };
                             }
 
-                            // 回檔 -2.5% 踢出即時追蹤
                             let dropFromPeak = (sig.maxGain || 0) - currentGain;
                             if (currentGain < -2.5 || dropFromPeak >= 2.5) {
                                 delete activeSignals[sym]; 
@@ -228,13 +224,11 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 2. 掃描全市場即時爆發標的 (上限 15 檔)
                     let burstCandidates = [];
                     globalData.forEach(coin => {
                         let sym = coin.symbol;
                         if (activeSignals[sym] || peak30Signals[sym]) return; 
 
-                        // 檢查今日提醒次數:若已滿 3 次則今天不再重複提醒
                         let record = alertCounts[sym];
                         if (record && record.count >= 3) return; 
 
@@ -316,7 +310,6 @@ html_content = """<!DOCTYPE html>
 
                     let netCapitalFlow = (parseFloat(diffPct) * parseFloat(oiPct)).toFixed(2);
                     
-                    // 動能狀態與變色標籤邏輯
                     let dropFromPeak = (sig.maxGain || 0) - parseFloat(diffPct);
                     let statusBadge = '';
                     let capitalFlowDesc = "";
@@ -374,7 +367,6 @@ html_content = """<!DOCTYPE html>
             }
             document.getElementById('market-feed').innerHTML = activeHtml;
 
-            // 超過 30% 飆漲紀錄分頁渲染
             let peak30Html = '';
             let peak30Keys = Object.keys(peak30Signals);
 
@@ -411,13 +403,17 @@ html_content = """<!DOCTYPE html>
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/api/data" or self.path != "/":
+            # 如果有其他路由需求可以放這，目前單頁直接回傳 html_content
+            pass
+        
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(html_content.encode("text/html; charset=utf-8"))
+        self.wfile.write(html_content.encode("utf-8"))
 
 if __name__ == "__main__":
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-        print(f"🚀 OKX 系統已更新 (上限15檔/一天3次/動能耗盡變色/超過30%紀錄)！Port: {PORT}")
+        print(f"🚀 雲端伺服器已在 Port {PORT} 啟動！")
         httpd.serve_forever()
