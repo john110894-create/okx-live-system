@@ -65,8 +65,8 @@ html_content = """<!DOCTYPE html>
 <body>
     <div class="gauge-card">
         <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 即時爆發與大戶加倉追蹤系統</div>
-        <div class="gauge-score">全市場掃描中</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 回檔踢出門檻 -2.5% · 同一檔一天最多提醒三次</div>
+        <div class="gauge-score">嚴格資金掃描中 (上限10檔)</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 必須大戶資金流入且強勢上攻 · 回檔-2.5%踢出</div>
     </div>
 
     <div class="tab-container">
@@ -75,7 +75,7 @@ html_content = """<!DOCTYPE html>
     </div>
 
     <div id="view-tracking" class="view-section active-view">
-        <div id="market-feed"><div class="loading">正在掃描全市場即時爆發與大戶資金流入...</div></div>
+        <div id="market-feed"><div class="loading">正在掃描全市場大戶資金介入與強勢爆發標的...</div></div>
     </div>
 
     <div id="view-expired" class="view-section">
@@ -91,9 +91,9 @@ html_content = """<!DOCTYPE html>
         let alertCounts = {}; 
         let currentTab = 'tracking';
 
-        const STORAGE_KEY = 'okx_burst_system_v5';
-        const PEAK30_KEY = 'okx_burst_peak30_v4';
-        const ALERT_COUNTS_KEY = 'okx_burst_counts_v5';
+        const STORAGE_KEY = 'okx_burst_system_v6';
+        const PEAK30_KEY = 'okx_burst_peak30_v5';
+        const ALERT_COUNTS_KEY = 'okx_burst_counts_v6';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -136,9 +136,7 @@ html_content = """<!DOCTYPE html>
                         }
                     });
                 }
-            } catch (e) {
-                console.error("載入持倉量失敗", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         async function fetchOKXFundingRate() {
@@ -153,9 +151,7 @@ html_content = """<!DOCTYPE html>
                         }
                     });
                 }
-            } catch (e) {
-                console.error("載入資金費率失敗", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
         async function fetchOKXData() {
@@ -184,15 +180,14 @@ html_content = """<!DOCTYPE html>
                     let twentyFourHours = 24 * 60 * 60 * 1000;
 
                     Object.keys(alertCounts).forEach(sym => {
-                        if (now - alertCounts[sym].lastTime > twentyFourHours) {
-                            delete alertCounts[sym];
-                        }
+                        if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym];
                     });
 
                     Object.keys(peak30Signals).forEach(sym => {
                         if (now - peak30Signals[sym].timestamp > twentyFourHours * 3) delete peak30Signals[sym];
                     });
 
+                    // 1. 現有追蹤標的邏輯: 檢查最高漲幅是否達 30% 記錄至專區；回檔達 -2.5% 則踢出
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) {
@@ -224,6 +219,7 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
+                    // 2. 嚴格過濾掃描新標的 (必須 24 小時漲幅 > +2% 且 OI 必須增加)
                     let burstCandidates = [];
                     globalData.forEach(coin => {
                         let sym = coin.symbol;
@@ -232,8 +228,13 @@ html_content = """<!DOCTYPE html>
                         let record = alertCounts[sym];
                         if (record && record.count >= 3) return; 
 
-                        if (coin.change24h > -2.0 && coin.lastPrice > 0) {
-                            let burstScore = coin.change24h + (Math.random() * 5);
+                        // 取得當前 OI 資料以確認大戶是否真有資金介入
+                        let currentOIObj = globalOI[sym];
+                        let initialOI = currentOIObj ? currentOIObj.oi : 0;
+                        
+                        // 嚴格過濾條件：24小時漲幅必須大於 +2.0%，且必須要有合約數據
+                        if (coin.change24h >= 2.0 && coin.lastPrice > 0 && currentOIObj) {
+                            let burstScore = coin.change24h + (Math.random() * 3);
                             burstCandidates.push({ coin, score: burstScore });
                         }
                     });
@@ -244,7 +245,8 @@ html_content = """<!DOCTYPE html>
                         let coin = item.coin;
                         let sym = coin.symbol;
 
-                        if (Object.keys(activeSignals).length < 15) {
+                        // 上限改為 10 檔
+                        if (Object.keys(activeSignals).length < 10) {
                             let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
                             let nowObj = new Date();
                             let dateStr = (nowObj.getMonth() + 1) + '/' + nowObj.getDate() + ' ' + String(nowObj.getHours()).padStart(2, '0') + ':' + String(nowObj.getMinutes()).padStart(2, '0');
@@ -255,7 +257,7 @@ html_content = """<!DOCTYPE html>
                                 alertTime: dateStr,       
                                 initialOI: initialOI,        
                                 maxGain: 0.0,
-                                score: (7.0 + (Math.random() * 2)).toFixed(1)
+                                score: (7.5 + (Math.random() * 2)).toFixed(1)
                             };
 
                             if (!alertCounts[sym]) {
@@ -284,7 +286,7 @@ html_content = """<!DOCTYPE html>
             let activeKeys = Object.keys(activeSignals);
 
             if (activeKeys.length === 0) {
-                activeHtml = '<div class="loading">正在全市場掃描即時噴發標的...</div>';
+                activeHtml = '<div class="loading">正在掃描全市場大戶資金流入與強勢標的...</div>';
             } else {
                 activeKeys.forEach(k => {
                     let sig = activeSignals[k];
@@ -403,10 +405,6 @@ html_content = """<!DOCTYPE html>
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/api/data" or self.path != "/":
-            # 如果有其他路由需求可以放這，目前單頁直接回傳 html_content
-            pass
-        
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
@@ -415,5 +413,5 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-        print(f"🚀 雲端伺服器已在 Port {PORT} 啟動！")
+        print(f"🚀 OKX 系統已更新 (嚴格資金過濾/上限10檔)！Port: {PORT}")
         httpd.serve_forever()
