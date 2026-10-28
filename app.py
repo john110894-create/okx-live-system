@@ -9,7 +9,7 @@ html_content = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OKX 即時爆發與大戶加倉追蹤系統 (雲端版)</title>
+    <title>OKX 智慧汰弱留強與動能追蹤系統</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -23,41 +23,78 @@ html_content = """<!DOCTYPE html>
         }
         html, body { height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; }
         body { font-family: -apple-system, sans-serif; background-color: var(--bg); color: var(--text-main); margin: 0; padding: 10px; }
+        
         .gauge-card { background: linear-gradient(135deg, #1e2329 0%, #111418 100%); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; text-align: center; margin-bottom: 12px; }
-        .gauge-score { font-size: 1.5rem; font-weight: bold; color: var(--accent); margin-top: 4px; }
+        .gauge-score { font-size: 1.4rem; font-weight: bold; color: var(--accent); margin-top: 4px; }
+        
+        .tab-container { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 4px; }
+        .tab-btn { background: #161a1e; border: 1px solid var(--card-border); color: var(--text-sub); padding: 8px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; cursor: pointer; white-space: nowrap; transition: 0.2s; display: flex; align-items: center; gap: 4px; }
+        .tab-btn.active { background: #2b313a; border-color: var(--accent); color: var(--text-main); }
+        
         .badge-active { background: rgba(14, 203, 129, 0.15); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
-        .badge-stoploss { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
+        .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
+        .badge-tp { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .score-badge { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: bold; }
+        
         .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+        .card.expired-card { background-color: #121519; border: 1px solid rgba(246, 70, 93, 0.3); }
+        
         .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .coin-title { font-size: 1.15rem; font-weight: bold; }
         .price-val { font-size: 1.1rem; font-weight: bold; }
+        
         .price-compare-box { background: #111418; border-radius: 8px; padding: 8px 10px; margin: 8px 0; display: flex; justify-content: space-between; font-size: 0.78rem; }
         .metrics-grid { background: #111418; border-radius: 8px; padding: 10px; margin: 8px 0; font-size: 0.78rem; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; color: var(--text-sub); }
         .metric-item b { color: var(--text-main); }
-        .loading { text-align: center; color: var(--text-sub); padding: 30px; font-size: 0.85rem; }
         .tp-box { background: rgba(240, 185, 11, 0.08); border: 1px solid rgba(240, 185, 11, 0.2); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 0.78rem; }
+        
+        .loading { text-align: center; color: var(--text-sub); padding: 30px; font-size: 0.85rem; }
+        .view-section { display: none; }
+        .view-section.active-view { display: block; }
     </style>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 即時爆發與大戶加倉追蹤系統 (雲端版)</div>
-        <div class="gauge-score">全市場掃描與波段監控中</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 警報發出後永不自動消失，直到觸發止損或手動出場</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 智慧汰弱留強與動能追蹤系統</div>
+        <div class="gauge-score">動態監控中</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 已整合真實持倉量(OI)與明確資金流向計算</div>
     </div>
 
-    <div id="market-feed"><div class="loading">正在掃描全市場即時爆發與大戶資金流入...</div></div>
+    <!-- 分頁切換按鈕 -->
+    <div class="tab-container">
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 即時追蹤</div>
+        <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 結算紀錄</div>
+    </div>
+
+    <!-- 即時追蹤畫面 -->
+    <div id="view-tracking" class="view-section active-view">
+        <div id="market-feed"><div class="loading">正在掃描全市場即時爆發與大戶資金流入...</div></div>
+    </div>
+
+    <!-- 已失效 / 結算紀錄畫面 -->
+    <div id="view-expired" class="view-section">
+        <div id="expired-feed"><div class="loading">目前尚無已結算之止盈/止損紀錄...</div></div>
+    </div>
 
     <script>
-        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, alertCounts = {};
-        const STORAGE_KEY = 'okx_burst_system_v3', ALERT_COUNTS_KEY = 'okx_burst_counts_v3';
+        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {};
+        const STORAGE_KEY = 'okx_system_v4', EXPIRED_KEY = 'okx_expired_v4', ALERT_COUNTS_KEY = 'okx_counts_v4';
+
+        function switchView(tabName) {
+            document.getElementById('tab-tracking').classList.toggle('active', tabName === 'tracking');
+            document.getElementById('tab-expired').classList.toggle('active', tabName === 'expired');
+            document.getElementById('view-tracking').classList.toggle('active-view', tabName === 'tracking');
+            document.getElementById('view-expired').classList.toggle('active-view', tabName === 'expired');
+        }
 
         function loadSignals() {
             let saved = localStorage.getItem(STORAGE_KEY); if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
+            let savedExpired = localStorage.getItem(EXPIRED_KEY); if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
             let savedCounts = localStorage.getItem(ALERT_COUNTS_KEY); if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
         }
         function saveSignals() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeSignals));
+            localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
             localStorage.setItem(ALERT_COUNTS_KEY, JSON.stringify(alertCounts));
         }
 
@@ -104,41 +141,45 @@ html_content = """<!DOCTYPE html>
 
                     loadSignals();
                     let now = Date.now(), twentyFourHours = 24 * 60 * 60 * 1000;
-                    Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]; });
+                    Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]);
 
-                    // 更新現有已觸發警報的幣種數據（最高點紀錄、止損狀態、止盈達成）
+                    // 檢查現有追蹤幣種的狀態（止盈、止損、最高點）
                     Object.keys(activeSignals).forEach(sym => {
+                        let sig = activeSignals[sym];
                         let coin = globalData.find(c => c.symbol === sym);
                         if (coin) {
-                            let initPrice = activeSignals[sym].firstAlertPrice;
+                            let initPrice = sig.firstAlertPrice;
                             let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
 
-                            // 記錄最高點百分比
-                            if (currentGain > (activeSignals[sym].maxGain || 0)) {
-                                activeSignals[sym].maxGain = currentGain;
-                            }
-                            if (currentGain > 12.0 && currentGain > (activeSignals[sym].peak12Plus || 0)) {
-                                activeSignals[sym].peak12Plus = currentGain;
-                            }
+                            if (currentGain > (sig.maxGain || 0)) sig.maxGain = currentGain;
+                            if (currentGain > 30.0 && currentGain > (sig.peak30Plus || 0)) sig.peak30Plus = currentGain;
 
-                            // 檢查止盈狀態 (10%, 25%, 40%)
-                            if (currentGain >= 40.0) activeSignals[sym].tpStatus = "🎯 第三止盈已達成 (+40%)";
-                            else if (currentGain >= 25.0) activeSignals[sym].tpStatus = "🎯 第二止盈已達成 (+25%)";
-                            else if (currentGain >= 10.0) activeSignals[sym].tpStatus = "🎯 第一止盈已達成 (+10%)";
+                            // 檢查止盈狀態紀錄
+                            if (currentGain >= 40.0) sig.tpStatus = "🎯 第三止盈已達成 (+40%)";
+                            else if (currentGain >= 25.0) sig.tpStatus = "🎯 第二止盈已達成 (+25%)";
+                            else if (currentGain >= 10.0) sig.tpStatus = "🎯 第一止盈已達成 (+10%)";
 
-                            // 檢查止損觸發 (假設跌破下方支撐或預設止損價)
-                            if (coin.lastPrice <= activeSignals[sym].stopLossPrice) {
-                                activeSignals[sym].isStoppedOut = true;
-                                activeSignals[sym].stopLossStatus = "🔴 已觸發止損出場";
+                            // 觸發止損或手動動能衰竭出場 ➔ 移至已失效/結算區
+                            if (coin.lastPrice <= sig.stopLossPrice) {
+                                expiredSignals[sym] = {
+                                    symbol: sym,
+                                    firstAlertPrice: initPrice,
+                                    exitPrice: coin.lastPrice,
+                                    maxGain: sig.maxGain.toFixed(2),
+                                    peak30: sig.peak30Plus ? `+${sig.peak30Plus.toFixed(2)}%` : "未達30%",
+                                    exitReason: "🔴 觸發止損出場",
+                                    timeStr: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                                };
+                                delete activeSignals[sym];
                             }
                         }
                     });
 
-                    // 尋找新爆發標的加入追蹤（不自動踢除，直到手動或止損）
+                    // 掃描新標的加入追蹤
                     let burstCandidates = [];
                     globalData.forEach(coin => {
                         let sym = coin.symbol;
-                        if (activeSignals[sym]) return;
+                        if (activeSignals[sym] || expiredSignals[sym]) return;
                         let record = alertCounts[sym]; if (record && record.count >= 2) return;
                         if (coin.change24h > -2.0 && coin.lastPrice > 0) {
                             burstCandidates.push({ coin, score: coin.change24h + (Math.random() * 5) });
@@ -153,10 +194,8 @@ html_content = """<!DOCTYPE html>
                             let dateStr = (nowObj.getMonth() + 1) + '/' + nowObj.getDate() + ' ' + String(nowObj.getHours()).padStart(2, '0') + ':' + String(nowObj.getMinutes()).padStart(2, '0');
                             
                             let alertPrice = coin.lastPrice;
-                            let stopLossPrice = alertPrice * 0.93; // 預设建議支撐下方 7% 作為止損
-                            let tp1 = alertPrice * 1.10;
-                            let tp2 = alertPrice * 1.25;
-                            let tp3 = alertPrice * 1.40;
+                            let stopLossPrice = alertPrice * 0.93; // 支撐下方止損
+                            let tp1 = alertPrice * 1.10, tp2 = alertPrice * 1.25, tp3 = alertPrice * 1.40;
 
                             activeSignals[sym] = {
                                 symbol: sym,
@@ -164,10 +203,8 @@ html_content = """<!DOCTYPE html>
                                 alertDateTime: dateStr,
                                 initialOI: initialOI,
                                 maxGain: 0.0,
-                                peak12Plus: 0.0,
+                                peak30Plus: 0.0,
                                 stopLossPrice: stopLossPrice,
-                                isStoppedOut: false,
-                                stopLossStatus: "🟢 未觸發 (持續追蹤中)",
                                 tpStatus: "⏳ 尋求突破中",
                                 tpPrices: { tp1, tp2, tp3 },
                                 score: (7.0 + (Math.random() * 2)).toFixed(1)
@@ -209,12 +246,12 @@ html_content = """<!DOCTYPE html>
                     else if (parseFloat(diffPct) > 0 && parseFloat(oiPct) < 0) { capitalFlowDesc = "🟡 價格推升但持倉減少 (空頭回補短多)"; capitalFlowColor = "var(--accent)"; }
                     else { capitalFlowDesc = "⚪ 多頭停損出場 (資金淨流出)"; capitalFlowColor = "var(--text-sub)"; }
 
-                    let peakDisplay = sig.peak12Plus > 0 ? `+${sig.peak12Plus.toFixed(2)}%` : "尚未達到 +12%";
+                    let peak30Display = sig.peak30Plus > 0 ? `+${sig.peak30Plus.toFixed(2)}%` : "尚未達到 +30%";
 
                     activeHtml += `
-                        <div class="card" style="${sig.isStoppedOut ? 'border-color: rgba(246,70,93,0.5); background-color: #1a1215;' : ''}">
+                        <div class="card">
                             <div class="row" style="margin-bottom: 8px;">
-                                <span class="${sig.isStoppedOut ? 'badge-stoploss' : 'badge-active'}">⚡ 警報時間: ${sig.alertDateTime}</span>
+                                <span class="badge-active">🚀 警報時間: ${sig.alertDateTime}</span>
                                 <span class="score-badge">綜合評分 +${sig.score} 分</span>
                             </div>
                             <div class="row">
@@ -229,23 +266,21 @@ html_content = """<!DOCTYPE html>
                                 <div style="text-align: right;">📊 <b>當前即時價位</b><br><span style="color:var(--text-main); font-weight:bold;">$${priceStr}</span></div>
                             </div>
 
-                            <!-- 新增：推薦止損與止損標記欄位 -->
+                            <!-- 止損與止損標記欄位 -->
                             <div class="metrics-grid">
                                 <div class="metric-item">🛑 推薦止損位置：<b style="color:var(--red);">$${slStr} (支撐下)</b></div>
-                                <div class="metric-item">⚠️ 止損觸發狀態：<b style="color: ${sig.isStoppedOut ? 'var(--red)' : 'var(--green)'};">${sig.stopLossStatus}</b></div>
+                                <div class="metric-item">⚠️ 止損觸發狀態：<b style="color: var(--green);">🟢 未觸發 (持續追蹤)</b></div>
                             </div>
 
-                            <!-- 新增：推薦止盈點位與達成紀錄 -->
+                            <!-- 止盈紀錄欄位 (10%, 25%, 40%) -->
                             <div class="tp-box">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                    <span>🎯 <b>推薦止盈點位：</b>① $${sig.tpPrices.tp1.toFixed(2)} (+10%) | ② $${sig.tpPrices.tp2.toFixed(2)} (+25%) | ③ $${sig.tpPrices.tp3.toFixed(2)} (+40%)</span>
-                                </div>
-                                <div style="color: var(--accent); font-weight: bold;">📊 止盈達成紀錄：${sig.tpStatus}</div>
+                                <div style="font-size: 0.78rem; color: var(--accent); margin-bottom: 2px;">🎯 <b>推薦止盈點位：</b>① $${sig.tpPrices.tp1.toFixed(2)} (+10%) | ② $${sig.tpPrices.tp2.toFixed(2)} (+25%) | ③ $${sig.tpPrices.tp3.toFixed(2)} (+40%)</div>
+                                <div style="color: var(--accent); font-weight: bold;">📊 止盈紀錄欄位：${sig.tpStatus}</div>
                             </div>
 
-                            <!-- 新增：超過12%漲幅紀錄（最高點） -->
+                            <!-- 飆漲超過30%紀錄欄位 (最高點) -->
                             <div class="metrics-grid" style="grid-template-columns: 1fr 1fr;">
-                                <div class="metric-item">🔥 12%up後最高點紀錄：<b style="color: var(--accent);">${peakDisplay}</b></div>
+                                <div class="metric-item">🔥 超過30%飆漲紀錄(最高點)：<b style="color: var(--accent);">${peak30Display}</b></div>
                                 <div class="metric-item">📈 目前波段最大漲幅：<b>+${(sig.maxGain || 0).toFixed(2)}%</b></div>
                             </div>
 
@@ -260,6 +295,32 @@ html_content = """<!DOCTYPE html>
                 });
             }
             document.getElementById('market-feed').innerHTML = activeHtml;
+
+            // 已失效 / 結算區畫面渲染
+            let expiredHtml = '', expiredKeys = Object.keys(expiredSignals);
+            if (expiredKeys.length === 0) {
+                expiredHtml = '<div class="loading">目前尚無已結算之止盈/止損紀錄</div>';
+            } else {
+                expiredKeys.forEach(k => {
+                    let exp = expiredSignals[k];
+                    expiredHtml += `
+                        <div class="card expired-card">
+                            <div class="row" style="margin-bottom: 6px;">
+                                <span class="badge-expired">${exp.exitReason}</span>
+                                <span style="font-size: 0.72rem; color: var(--text-sub);">${exp.timeStr} 結算下架</span>
+                            </div>
+                            <div class="row">
+                                <div><span class="coin-title">${exp.symbol}</span></div>
+                                <div style="font-size: 0.8rem; color: var(--text-sub);">警報價: $${exp.firstAlertPrice} ➔ 結算價: $${exp.exitPrice}</div>
+                            </div>
+                            <div class="metrics-grid" style="margin-top: 6px;">
+                                <div class="metric-item">📊 歷史最高漲幅紀錄：<b>+${exp.maxGain}%</b></div>
+                                <div class="metric-item">🔥 超過30%紀錄：<b style="color:var(--accent);">${exp.peak30}</b></div>
+                            </div>
+                        </div>`;
+                });
+            }
+            document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
 
         fetchOKXData(); 
