@@ -1,7 +1,7 @@
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 
-HTML_CONTENT = """
+HTML_CONTENT = """ 
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
