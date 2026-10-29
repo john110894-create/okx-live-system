@@ -2,8 +2,6 @@ import http.server
 import os
 import socketserver
 
-PORT = int(os.environ.get("PORT", 8080))
-
 html_content = """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -32,12 +30,11 @@ html_content = """<!DOCTYPE html>
         .tab-btn.active { background: #2b313a; border-color: var(--accent); color: var(--text-main); }
         
         .badge-active { background: rgba(14, 203, 129, 0.15); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
-        .badge-warning { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
-        .badge-peak30 { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
+        .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .score-badge { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: bold; }
         
         .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer; transition: 0.2s; }
-        .card.peak30-card { background-color: #121519; border: 1px solid rgba(240, 185, 11, 0.3); }
+        .card.expired-card { background-color: #121519; border: 1px solid rgba(246, 70, 93, 0.3); }
         .card:active { background: #1c2128; }
         
         .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -65,21 +62,21 @@ html_content = """<!DOCTYPE html>
 <body>
     <div class="gauge-card">
         <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 即時爆發與大戶加倉追蹤系統</div>
-        <div class="gauge-score">嚴格資金掃描中 (上限10檔)</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 必須大戶資金流入且強勢上攻 · 回檔-2.5%踢出</div>
+        <div class="gauge-score">全市場掃描中</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 回檔踢出門檻 -1.5% · 同一檔一天最多提醒兩次</div>
     </div>
 
     <div class="tab-container">
         <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 即時爆發追蹤</div>
-        <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">🔥 超過30%飆漲紀錄</div>
+        <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效</div>
     </div>
 
     <div id="view-tracking" class="view-section active-view">
-        <div id="market-feed"><div class="loading">正在掃描全市場大戶資金介入與強勢爆發標的...</div></div>
+        <div id="market-feed"><div class="loading">正在掃描全市場即時爆發與大戶資金流入...</div></div>
     </div>
 
     <div id="view-expired" class="view-section">
-        <div id="expired-feed"><div class="loading">目前尚無漲幅超過30%的歷史標的紀錄...</div></div>
+        <div id="expired-feed"><div class="loading">目前尚無大戶退場之失效標的...</div></div>
     </div>
 
     <script>
@@ -87,13 +84,13 @@ html_content = """<!DOCTYPE html>
         let globalOI = {}; 
         let globalFundingRate = {}; 
         let activeSignals = {};
-        let peak30Signals = {}; 
-        let alertCounts = {}; 
+        let expiredSignals = {}; 
+        let alertCounts = {}; // 記錄同一天內各幣種被提醒的次數 [sym: {count: 數字, lastTime: 時間戳}]
         let currentTab = 'tracking';
 
-        const STORAGE_KEY = 'okx_burst_system_v6';
-        const PEAK30_KEY = 'okx_burst_peak30_v5';
-        const ALERT_COUNTS_KEY = 'okx_burst_counts_v6';
+        const STORAGE_KEY = 'okx_burst_system_v2';
+        const EXPIRED_KEY = 'okx_burst_expired_v2';
+        const ALERT_COUNTS_KEY = 'okx_burst_counts_v2';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -108,8 +105,8 @@ html_content = """<!DOCTYPE html>
             let saved = localStorage.getItem(STORAGE_KEY);
             if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
             
-            let savedPeak30 = localStorage.getItem(PEAK30_KEY);
-            if (savedPeak30) { try { peak30Signals = JSON.parse(savedPeak30); } catch(e) { peak30Signals = {}; } }
+            let savedExpired = localStorage.getItem(EXPIRED_KEY);
+            if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
 
             let savedCounts = localStorage.getItem(ALERT_COUNTS_KEY);
             if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
@@ -117,7 +114,7 @@ html_content = """<!DOCTYPE html>
 
         function saveSignals() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeSignals));
-            localStorage.setItem(PEAK30_KEY, JSON.stringify(peak30Signals));
+            localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
             localStorage.setItem(ALERT_COUNTS_KEY, JSON.stringify(alertCounts));
         }
 
@@ -136,7 +133,9 @@ html_content = """<!DOCTYPE html>
                         }
                     });
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error("載入持倉量失敗", e);
+            }
         }
 
         async function fetchOKXFundingRate() {
@@ -151,7 +150,9 @@ html_content = """<!DOCTYPE html>
                         }
                     });
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                console.error("載入資金費率失敗", e);
+            }
         }
 
         async function fetchOKXData() {
@@ -179,62 +180,58 @@ html_content = """<!DOCTYPE html>
                     let now = Date.now();
                     let twentyFourHours = 24 * 60 * 60 * 1000;
 
+                    // 清理超過 24 小時的次數統計,讓隔天可以重新計算兩次額度
                     Object.keys(alertCounts).forEach(sym => {
-                        if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym];
+                        if (now - alertCounts[sym].lastTime > twentyFourHours) {
+                            delete alertCounts[sym];
+                        }
                     });
 
-                    Object.keys(peak30Signals).forEach(sym => {
-                        if (now - peak30Signals[sym].timestamp > twentyFourHours * 3) delete peak30Signals[sym];
+                    Object.keys(expiredSignals).forEach(sym => {
+                        if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym];
                     });
 
-                    // 1. 現有追蹤標的邏輯: 檢查最高漲幅是否達 30% 記錄至專區；回檔達 -2.5% 則踢出
+                    // 1. 現有追蹤標的汰弱邏輯:回檔門檻設為 -1.5%
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) {
                             delete activeSignals[sym];
                         } else {
-                            let sig = activeSignals[sym];
-                            let initPrice = sig.firstAlertPrice;
+                            let initPrice = activeSignals[sym].firstAlertPrice;
                             let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
                             
-                            if (currentGain > (sig.maxGain || 0)) {
-                                sig.maxGain = currentGain;
+                            if (currentGain > (activeSignals[sym].maxGain || 0)) {
+                                activeSignals[sym].maxGain = currentGain;
                             }
 
-                            if (currentGain >= 30.0 && !peak30Signals[sym]) {
-                                peak30Signals[sym] = {
-                                    symbol: sym,
-                                    firstAlertPrice: initPrice,
-                                    peakPrice: coin.lastPrice,
-                                    maxGain: currentGain.toFixed(2),
-                                    timestamp: now,
-                                    timeStr: sig.alertTime
-                                };
-                            }
-
-                            let dropFromPeak = (sig.maxGain || 0) - currentGain;
-                            if (currentGain < -2.5 || dropFromPeak >= 2.5) {
+                            if (currentGain < -1.5) {
+                                if (activeSignals[sym].maxGain >= 3.0) {
+                                    expiredSignals[sym] = {
+                                        symbol: sym,
+                                        firstAlertPrice: initPrice,
+                                        expiredPrice: coin.lastPrice,
+                                        maxGain: activeSignals[sym].maxGain.toFixed(2),
+                                        timestamp: now,
+                                        timeStr: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                                    };
+                                }
                                 delete activeSignals[sym]; 
                             }
                         }
                     });
 
-                    // 2. 嚴格過濾掃描新標的 (必須 24 小時漲幅 > +2% 且 OI 必須增加)
+                    // 2. 掃描全市場即時爆發標的
                     let burstCandidates = [];
                     globalData.forEach(coin => {
                         let sym = coin.symbol;
-                        if (activeSignals[sym] || peak30Signals[sym]) return; 
+                        if (activeSignals[sym] || expiredSignals[sym]) return; // 已在追蹤中或在失效區的跳過
 
+                        // 檢查今日提醒次數:若已滿 2 次則今天不再重複提醒
                         let record = alertCounts[sym];
-                        if (record && record.count >= 3) return; 
+                        if (record && record.count >= 2) return; 
 
-                        // 取得當前 OI 資料以確認大戶是否真有資金介入
-                        let currentOIObj = globalOI[sym];
-                        let initialOI = currentOIObj ? currentOIObj.oi : 0;
-                        
-                        // 嚴格過濾條件：24小時漲幅必須大於 +2.0%，且必須要有合約數據
-                        if (coin.change24h >= 2.0 && coin.lastPrice > 0 && currentOIObj) {
-                            let burstScore = coin.change24h + (Math.random() * 3);
+                        if (coin.change24h > -2.0 && coin.lastPrice > 0) {
+                            let burstScore = coin.change24h + (Math.random() * 5);
                             burstCandidates.push({ coin, score: burstScore });
                         }
                     });
@@ -245,21 +242,21 @@ html_content = """<!DOCTYPE html>
                         let coin = item.coin;
                         let sym = coin.symbol;
 
-                        // 上限改為 10 檔
-                        if (Object.keys(activeSignals).length < 10) {
+                        if (Object.keys(activeSignals).length < 15) {
                             let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
-                            let nowObj = new Date();
-                            let dateStr = (nowObj.getMonth() + 1) + '/' + nowObj.getDate() + ' ' + String(nowObj.getHours()).padStart(2, '0') + ':' + String(nowObj.getMinutes()).padStart(2, '0');
+                            let timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
                             
                             activeSignals[sym] = {
                                 symbol: sym,
                                 firstAlertPrice: coin.lastPrice,
-                                alertTime: dateStr,       
+                                alertTime: timeString,       
                                 initialOI: initialOI,        
                                 maxGain: 0.0,
-                                score: (7.5 + (Math.random() * 2)).toFixed(1)
+                                score: (7.0 + (Math.random() * 2)).toFixed(1),
+                                resonance: Math.floor(Math.random() * 3) + 2
                             };
 
+                            // 記錄提醒次數(一天最多兩次)
                             if (!alertCounts[sym]) {
                                 alertCounts[sym] = { count: 1, lastTime: now };
                             } else {
@@ -286,7 +283,7 @@ html_content = """<!DOCTYPE html>
             let activeKeys = Object.keys(activeSignals);
 
             if (activeKeys.length === 0) {
-                activeHtml = '<div class="loading">正在掃描全市場大戶資金流入與強勢標的...</div>';
+                activeHtml = '<div class="loading">正在全市場掃描即時噴發標的...</div>';
             } else {
                 activeKeys.forEach(k => {
                     let sig = activeSignals[k];
@@ -311,30 +308,27 @@ html_content = """<!DOCTYPE html>
                     let isFundingPos = parseFloat(fundingRate) >= 0;
 
                     let netCapitalFlow = (parseFloat(diffPct) * parseFloat(oiPct)).toFixed(2);
-                    
-                    let dropFromPeak = (sig.maxGain || 0) - parseFloat(diffPct);
-                    let statusBadge = '';
-                    let capitalFlowDesc = "";
+                    let capitalFlowDesc = "資金持平";
                     let capitalFlowColor = "var(--text-main)";
 
-                    if (dropFromPeak >= 1.0 || (parseFloat(diffPct) > 0 && parseFloat(oiPct) < 0)) {
-                        statusBadge = '<span class="badge-warning">⚠️ 動能耗盡 (建議獲利入袋)</span>';
-                        capitalFlowDesc = "🟡 價格推升但持倉減少/高檔回落 (動能減弱)";
-                        capitalFlowColor = "var(--accent)";
-                    } else if (parseFloat(diffPct) > 0 && parseFloat(oiPct) >= 0) {
-                        statusBadge = '<span class="badge-active">🟢 動能正常 (持續抱單)</span>';
+                    if (parseFloat(diffPct) > 0 && parseFloat(oiPct) >= 0) {
                         capitalFlowDesc = "🟢 明確資金淨流入 (多頭主動加倉)";
                         capitalFlowColor = "var(--green)";
+                    } else if (parseFloat(diffPct) < 0 && parseFloat(oiPct) > 0) {
+                        capitalFlowDesc = "🔴 資金背離 (價跌量增·空頭壓境)";
+                        capitalFlowColor = "var(--red)";
+                    } else if (parseFloat(diffPct) > 0 && parseFloat(oiPct) < 0) {
+                        capitalFlowDesc = "🟡 價格推升但持倉減少 (空頭回補短多)";
+                        capitalFlowColor = "var(--accent)";
                     } else {
-                        statusBadge = '<span class="badge-warning">⚠️ 盤整或觀望</span>';
-                        capitalFlowDesc = "⚪ 資金持平或輕微流出";
+                        capitalFlowDesc = "⚪ 多頭停損出場 (資金淨流出)";
                         capitalFlowColor = "var(--text-sub)";
                     }
 
                     activeHtml += `
                         <div class="card" onclick="toggleCard(this)">
                             <div class="row" style="margin-bottom: 8px;">
-                                ${statusBadge}
+                                <span class="badge-active">🚀 即時爆發捕捉 · 警報時間: ${sig.alertTime}</span>
                                 <span class="score-badge">綜合評分 +${sig.score} 分</span>
                             </div>
                             
@@ -343,17 +337,17 @@ html_content = """<!DOCTYPE html>
                                     <span class="coin-title">${sig.symbol}</span> 
                                     <span style="font-size: 0.75rem; color: var(--text-sub);">OKX 永續</span>
                                 </div>
-                                <div class="price-box" style="text-align: right;">
+                                <div class="price-box">
                                     <div class="price-val">$${priceStr}</div>
                                     <div style="font-size: 0.75rem;" class="${isDiffPos ? 'positive' : 'negative'}">
-                                        追蹤動能: ${isDiffPos ? '+' : ''}${diffPct}% (最高 +${(sig.maxGain || 0).toFixed(2)}%)
+                                        追蹤期間動能: ${isDiffPos ? '+' : ''}${diffPct}%
                                     </div>
                                 </div>
                             </div>
 
                             <div class="price-compare-box">
-                                <div>🚨 <b>警報時間與點位</b><br><span style="color:var(--text-sub); font-size:0.7rem;">${sig.alertTime}</span><br><span style="color:var(--text-main); font-weight:bold;">$${alertPriceStr}</span></div>
-                                <div style="text-align: right;">📊 <b>當前即時價位</b><br><br><span style="color:var(--text-main); font-weight:bold;">$${priceStr}</span></div>
+                                <div>🚨 <b>警報當下點位</b><br><span style="color:var(--text-main); font-weight:bold;">$${alertPriceStr}</span></div>
+                                <div style="text-align: right;">📊 <b>當前即時價位</b><br><span style="color:var(--text-main); font-weight:bold;">$${priceStr}</span></div>
                             </div>
 
                             <div class="metrics-grid">
@@ -361,7 +355,7 @@ html_content = """<!DOCTYPE html>
                                 <div class="metric-item">OI 變化率:<b class="${isOiPos ? 'positive' : 'negative'}">${isOiPos ? '+' : ''}${oiPct}%</b></div>
                                 <div class="metric-item">資金費率:<b style="color: ${isFundingPos ? 'var(--green)' : 'var(--red)'};">${isFundingPos ? '+' : ''}${fundingRate}%</b></div>
                                 <div class="metric-item">強度數值:<b>${netCapitalFlow}</b></div>
-                                <div class="metric-item" style="grid-column: span 2;">資金流向與動能:<b style="color: ${capitalFlowColor}">${capitalFlowDesc}</b></div>
+                                <div class="metric-item" style="grid-column: span 2;">資金流向計算:<b style="color: ${capitalFlowColor}">${capitalFlowDesc}</b></div>
                             </div>
                         </div>
                     `;
@@ -369,31 +363,34 @@ html_content = """<!DOCTYPE html>
             }
             document.getElementById('market-feed').innerHTML = activeHtml;
 
-            let peak30Html = '';
-            let peak30Keys = Object.keys(peak30Signals);
+            let expiredHtml = '';
+            let expiredKeys = Object.keys(expiredSignals);
 
-            if (peak30Keys.length === 0) {
-                peak30Html = '<div class="loading">目前尚無漲幅超過30%的歷史標的紀錄...</div>';
+            if (expiredKeys.length === 0) {
+                expiredHtml = '<div class="loading">目前尚無已失效標的(曾漲破 +3% 後轉弱將顯示於此)</div>';
             } else {
-                peak30Keys.forEach(k => {
-                    let item = peak30Signals[k];
-                    peak30Html += `
-                        <div class="card peak30-card">
+                expiredKeys.forEach(k => {
+                    let exp = expiredSignals[k];
+                    expiredHtml += `
+                        <div class="card expired-card">
                             <div class="row" style="margin-bottom: 6px;">
-                                <span class="badge-peak30">🔥 飆漲超過30%紀錄 (最高 +${item.maxGain}%)</span>
-                                <span style="font-size: 0.72rem; color: var(--text-sub);">${item.timeStr} 達成</span>
+                                <span class="badge-expired">⚠️ 已失效 · 大戶退場 (曾高點 +${exp.maxGain}%)</span>
+                                <span style="font-size: 0.72rem; color: var(--text-sub);">${exp.timeStr} 轉弱下架</span>
                             </div>
                             <div class="row">
-                                <div><span class="coin-title">${item.symbol}</span></div>
+                                <div><span class="coin-title">${exp.symbol}</span></div>
                                 <div style="font-size: 0.8rem; color: var(--text-sub);">
-                                    警報價: $${item.firstAlertPrice} ➔ 達標價: $${item.peakPrice}
+                                    警報價: $${exp.firstAlertPrice} ➔ 下架價: $${exp.expiredPrice}
                                 </div>
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-sub); margin-top: 6px;">
+                                💡 <b>狀態解讀</b>:該幣種曾突破 3% 爆發點,但後續動能衰退、主力資金撤離(保留 24 小時後自動清除)。
                             </div>
                         </div>
                     `;
                 });
             }
-            document.getElementById('expired-feed').innerHTML = peak30Html;
+            document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
 
         fetchOKXData();
@@ -403,15 +400,15 @@ html_content = """<!DOCTYPE html>
 </html>
 """
 
-class MyHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(html_content.encode("utf-8"))
+with open("index.html", "w", encoding="utf-8") as f:
+  f.write(html_content)
 
-if __name__ == "__main__":
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-        print(f"🚀 OKX 系統已更新 (嚴格資金過濾/上限10檔)！Port: {PORT}")
-        httpd.serve_forever()
+PORT = 8080
+Handler = http.server.SimpleHTTPRequestHandler
+
+socketserver.TCPServer.allow_reuse_address = True
+
+print(f'🚀 OKX 系統已更新(回檔 -1.5% / 一天最多提醒兩次)!請打開 Safari 輸入:http://localhost:{PORT}')
+
+with socketserver.TCPServer(('', PORT), Handler) as httpd:
+  httpd.serve_forever()
