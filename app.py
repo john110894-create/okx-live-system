@@ -48,7 +48,7 @@ html_content = """<!DOCTYPE html>
     <div class="gauge-card">
         <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 即時爆發與大戶加倉追蹤系統 (雲端版)</div>
         <div class="gauge-score">全市場掃描中</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 回檔踢出門檻 -1.5% · 同一檔一天最多提醒兩次</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 踢出</div>
     </div>
     <div class="tab-container">
         <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 即時爆發追蹤</div>
@@ -58,7 +58,7 @@ html_content = """<!DOCTYPE html>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無大戶退場之失效標的...</div></div></div>
     <script>
         let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_burst_system_v2', EXPIRED_KEY = 'okx_burst_expired_v2', ALERT_COUNTS_KEY = 'okx_burst_counts_v2';
+        const STORAGE_KEY = 'okx_burst_system_v3', EXPIRED_KEY = 'okx_burst_expired_v3', ALERT_COUNTS_KEY = 'okx_burst_counts_v3';
         function switchView(tabName) {
             currentTab = tabName;
             document.getElementById('tab-tracking').classList.toggle('active', tabName === 'tracking');
@@ -122,11 +122,37 @@ html_content = """<!DOCTYPE html>
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) { delete activeSignals[sym]; } else {
                             let initPrice = activeSignals[sym].firstAlertPrice, currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
-                            if (currentGain > (activeSignals[sym].maxGain || 0)) activeSignals[sym].maxGain = currentGain;
-                            if (currentGain < -1.5) {
-                                if (activeSignals[sym].maxGain >= 3.0) {
-                                    expiredSignals[sym] = { symbol: sym, firstAlertPrice: initPrice, expiredPrice: coin.lastPrice, maxGain: activeSignals[sym].maxGain.toFixed(2), timestamp: now, timeStr: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
-                                }
+                            
+                            // 更新最高盈利紀錄 (maxGain)
+                            if (currentGain > (activeSignals[sym].maxGain || 0)) {
+                                activeSignals[sym].maxGain = currentGain;
+                            }
+                            
+                            let maxGain = activeSignals[sym].maxGain || 0;
+                            let shouldExpire = false;
+                            let expireReason = "";
+
+                            // 1. 止損條件：跌幅達到 -2%
+                            if (currentGain <= -2.0) {
+                                shouldExpire = true;
+                                expireReason = "止損 (-2%)";
+                            }
+                            // 2. 正盈利回檔條件：當曾達正盈利，且從最高點回檔 10% (即目前獲利較最高點下跌 10% 以上)
+                            else if (maxGain > 0 && (currentGain <= maxGain - 10.0)) {
+                                shouldExpire = true;
+                                expireReason = `盈利回檔 10% (高點 +${maxGain.toFixed(2)}%)`;
+                            }
+
+                            if (shouldExpire) {
+                                expiredSignals[sym] = { 
+                                    symbol: sym, 
+                                    firstAlertPrice: initPrice, 
+                                    expiredPrice: coin.lastPrice, 
+                                    maxGain: maxGain.toFixed(2), 
+                                    reason: expireReason,
+                                    timestamp: now, 
+                                    timeStr: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
+                                };
                                 delete activeSignals[sym];
                             }
                         }
@@ -205,14 +231,14 @@ html_content = """<!DOCTYPE html>
             }
             document.getElementById('market-feed').innerHTML = activeHtml;
             let expiredHtml = '', expiredKeys = Object.keys(expiredSignals);
-            if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無已失效標的（曾漲破 +3% 後轉弱將顯示於此）</div>';
+            if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無已失效標的</div>';
             else {
                 expiredKeys.forEach(k => {
                     let exp = expiredSignals[k];
                     expiredHtml += `
                         <div class="card expired-card">
                             <div class="row" style="margin-bottom: 6px;">
-                                <span class="badge-expired">⚠️ 已失效 · 大戶退場 (曾高點 +${exp.maxGain}%)</span>
+                                <span class="badge-expired">⚠️ 已失效 · ${exp.reason || '大戶退場'} (曾高點 +${exp.maxGain}%)</span>
                                 <span style="font-size: 0.72rem; color: var(--text-sub);">${exp.timeStr} 轉弱下架</span>
                             </div>
                             <div class="row">
