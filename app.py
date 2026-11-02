@@ -9,7 +9,7 @@ html_content = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OKX 即時漲幅榜與大戶加倉追蹤系統</title>
+    <title>OKX 漲幅榜前 15 大強勢追蹤系統</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -31,6 +31,7 @@ html_content = """<!DOCTYPE html>
         .badge-active { background: rgba(14, 203, 129, 0.15); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .score-badge { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: bold; }
+        .rating-stars { color: var(--accent); font-size: 0.85rem; font-weight: bold; }
         .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer; transition: 0.2s; }
         .card.expired-card { background-color: #121519; border: 1px solid rgba(246, 70, 93, 0.3); }
         .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -48,8 +49,8 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 漲幅榜前 15 大強勢追蹤系統</div>
-        <div class="gauge-score">實時漲幅榜掃描中</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲幅榜前 15 強追蹤系統</div>
+        <div class="gauge-score">實時加密市場掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 6% 移至失效區</div>
     </div>
     <div class="tab-container">
@@ -60,7 +61,7 @@ html_content = """<!DOCTYPE html>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
         let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_gainers_v1', EXPIRED_KEY = 'okx_gainers_expired_v1';
+        const STORAGE_KEY = 'okx_gainers_v2', EXPIRED_KEY = 'okx_gainers_expired_v2';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -170,7 +171,7 @@ html_content = """<!DOCTYPE html>
                     let topGainers = globalData.slice(0, 15);
                     topGainers.forEach(coin => {
                         let sym = coin.symbol;
-                        if (expiredSignals[sym]) return; // 如果在失效區就不重複捕捉
+                        if (expiredSignals[sym]) return;
                         
                         if (!activeSignals[sym]) {
                             let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
@@ -186,7 +187,6 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 清理已經掉出漲幅榜前 30 名的舊標的（避免永遠卡著）
                     let top30Symbols = globalData.slice(0, 30).map(c => c.symbol);
                     Object.keys(activeSignals).forEach(sym => {
                         if (!top30Symbols.includes(sym) && (activeSignals[sym].maxGain || 0) <= 0) {
@@ -200,13 +200,22 @@ html_content = """<!DOCTYPE html>
             } catch (err) { console.error(err); }
         }
 
+        // 計算推薦指數 (1 ~ 5 星)
+        function getRecommendationStars(change24h, diffPct, oiPct) {
+            let score = (change24h * 0.4) + (parseFloat(diffPct) * 0.4) + (parseFloat(oiPct) * 0.2);
+            if (score > 15) return "⭐⭐⭐⭐⭐ (極強推薦)";
+            if (score > 10) return "⭐⭐⭐⭐ (強勢加倉)";
+            if (score > 5)  return "⭐⭐⭐ (逢低關注)";
+            if (score > 0)  return "⭐⭐ (震盪偏多)";
+            return "⭐ (保守觀望)";
+        }
+
         function toggleCard(cardElement) { cardElement.classList.toggle('expanded'); }
 
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
             if (activeKeys.length === 0) activeHtml = '<div class="loading">正在掃描漲幅榜強勢幣種...</div>';
             else {
-                // 依照當前動能排序顯示
                 activeKeys.sort((a, b) => {
                     let cA = globalData.find(c => c.symbol === a)?.lastPrice || 0;
                     let cB = globalData.find(c => c.symbol === b)?.lastPrice || 0;
@@ -227,11 +236,13 @@ html_content = """<!DOCTYPE html>
                     let isOiPos = oiDiff >= 0, fundingRate = globalFundingRate[sig.symbol] !== undefined ? globalFundingRate[sig.symbol].toFixed(4) : "0.0100";
                     let isFundingPos = parseFloat(fundingRate) >= 0;
 
+                    let stars = getRecommendationStars(coinData.change24h, diffPct, oiPct);
+
                     activeHtml += `
                         <div class="card" onclick="toggleCard(this)">
-                            <div class="row" style="margin-bottom: 8px;">
-                                <span class="badge-active">🚀 漲幅榜追蹤 · 24h漲幅: +${coinData.change24h.toFixed(2)}%</span>
-                                <span class="score-badge">追蹤動能: ${isDiffPos ? '+' : ''}${diffPct}%</span>
+                            <div class="row" style="margin-bottom: 6px;">
+                                <span class="badge-active">🚀 漲幅榜 · 24h: +${coinData.change24h.toFixed(2)}%</span>
+                                <span class="rating-stars">${stars}</span>
                             </div>
                             <div class="row">
                                 <div><span class="coin-title">${sig.symbol}</span> <span style="font-size: 0.75rem; color: var(--text-sub);">OKX 永續</span></div>
@@ -244,7 +255,7 @@ html_content = """<!DOCTYPE html>
                                 <div style="text-align: right;">📊 <b>當前即時價位</b><br><span style="color:var(--text-main); font-weight:bold;">$${priceStr}</span></div>
                             </div>
                             <div class="metrics-grid">
-                                <div class="metric-item">真實持倉量(OI)：<b>${currentOI.toLocaleString()}張</b></div>
+                                <div class="metric-item">追蹤動能：<b class="${isDiffPos ? 'positive' : 'negative'}">${isDiffPos ? '+' : ''}${diffPct}%</b></div>
                                 <div class="metric-item">OI 變化率：<b class="${isOiPos ? 'positive' : 'negative'}">${isOiPos ? '+' : ''}${oiPct}%</b></div>
                                 <div class="metric-item">資金費率：<b style="color: ${isFundingPos ? 'var(--green)' : 'var(--red)'};">${isFundingPos ? '+' : ''}${fundingRate}%</b></div>
                                 <div class="metric-item">最高盈利記錄：<b style="color: var(--accent);">+${(activeSignals[k].maxGain || 0).toFixed(2)}%</b></div>
