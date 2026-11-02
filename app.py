@@ -49,7 +49,7 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣追蹤系統</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲追蹤系統</div>
         <div class="gauge-score">實時加密市場掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 6% 移至失效區</div>
     </div>
@@ -61,7 +61,7 @@ html_content = """<!DOCTYPE html>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
         let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_gainers_v3', EXPIRED_KEY = 'okx_gainers_expired_v3';
+        const STORAGE_KEY = 'okx_gainers_v4', EXPIRED_KEY = 'okx_gainers_expired_v4';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -123,11 +123,11 @@ html_content = """<!DOCTYPE html>
                     let now = Date.now(), twentyFourHours = 24 * 60 * 60 * 1000;
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
 
-                    // 檢查追蹤中的標的：只有觸發 -2% 止損或回檔 6% 時才移至失效區
+                    // 檢查追蹤中的標的風控條件 (-2% 止損或回檔 6%)
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) { 
-                            return; // 如果暫時找不到資料，保留記錄不刪除
+                            return; 
                         } else {
                             let initPrice = activeSignals[sym].firstAlertPrice;
                             let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
@@ -164,7 +164,7 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 捕捉漲幅榜前 15 名加入追蹤（只要沒進失效區，就會穩定留著顯示當前變動％數）
+                    // 捕捉漲幅榜前 15 名加入追蹤
                     let topGainers = globalData.slice(0, 15);
                     topGainers.forEach(coin => {
                         let sym = coin.symbol;
