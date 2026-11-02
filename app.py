@@ -9,7 +9,7 @@ html_content = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OKX 即時爆發與大戶加倉追蹤系統</title>
+    <title>OKX 即時漲幅榜與大戶加倉追蹤系統</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -42,23 +42,26 @@ html_content = """<!DOCTYPE html>
         .loading { text-align: center; color: var(--text-sub); padding: 30px; font-size: 0.85rem; }
         .view-section { display: none; }
         .view-section.active-view { display: block; }
+        .positive { color: var(--green); }
+        .negative { color: var(--red); }
     </style>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 即時爆發與大戶加倉追蹤系統 (雲端版)</div>
-        <div class="gauge-score">全市場掃描中</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 踢出</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 漲幅榜前 15 大強勢追蹤系統</div>
+        <div class="gauge-score">實時漲幅榜掃描中</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 6% 移至失效區</div>
     </div>
     <div class="tab-container">
-        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 即時爆發追蹤</div>
-        <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效</div>
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 漲幅榜強勢追蹤 (Top 15)</div>
+        <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 迴避</div>
     </div>
-    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在掃描全市場即時爆發與大戶資金流入...</div></div></div>
-    <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無大戶退場之失效標的...</div></div></div>
+    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在擷取 OKX 漲幅榜前 15 強...</div></div></div>
+    <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
-        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_burst_system_v3', EXPIRED_KEY = 'okx_burst_expired_v3', ALERT_COUNTS_KEY = 'okx_burst_counts_v3';
+        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, currentTab = 'tracking';
+        const STORAGE_KEY = 'okx_gainers_v1', EXPIRED_KEY = 'okx_gainers_expired_v1';
+
         function switchView(tabName) {
             currentTab = tabName;
             document.getElementById('tab-tracking').classList.toggle('active', tabName === 'tracking');
@@ -69,12 +72,10 @@ html_content = """<!DOCTYPE html>
         function loadSignals() {
             let saved = localStorage.getItem(STORAGE_KEY); if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
             let savedExpired = localStorage.getItem(EXPIRED_KEY); if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
-            let savedCounts = localStorage.getItem(ALERT_COUNTS_KEY); if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
         }
         function saveSignals() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeSignals));
             localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
-            localStorage.setItem(ALERT_COUNTS_KEY, JSON.stringify(alertCounts));
         }
         async function fetchOKXOpenInterest() {
             try {
@@ -114,16 +115,23 @@ html_content = """<!DOCTYPE html>
                         let last = parseFloat(item.last), sod = parseFloat(item.sodUtc0);
                         return { symbol: item.instId.replace('-USDT-SWAP', ''), lastPrice: last, change24h: sod ? ((last - sod) / sod) * 100 : 0 };
                     }).filter(item => !isNaN(item.lastPrice));
+
+                    // 依照 24 小時漲幅由大到小排序
+                    globalData.sort((a, b) => b.change24h - a.change24h);
+
                     loadSignals();
                     let now = Date.now(), twentyFourHours = 24 * 60 * 60 * 1000;
-                    Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]; });
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
+
+                    // 檢查目前追蹤中的標的是否觸發止損或回檔 6%
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
-                        if (!coin) { delete activeSignals[sym]; } else {
-                            let initPrice = activeSignals[sym].firstAlertPrice, currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
+                        if (!coin) { 
+                            delete activeSignals[sym]; 
+                        } else {
+                            let initPrice = activeSignals[sym].firstAlertPrice;
+                            let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
                             
-                            // 更新最高盈利紀錄 (maxGain)
                             if (currentGain > (activeSignals[sym].maxGain || 0)) {
                                 activeSignals[sym].maxGain = currentGain;
                             }
@@ -137,10 +145,10 @@ html_content = """<!DOCTYPE html>
                                 shouldExpire = true;
                                 expireReason = "止損 (-2%)";
                             }
-                            // 2. 正盈利回檔條件：當曾達正盈利，且從最高點回檔 10% (即目前獲利較最高點下跌 10% 以上)
-                            else if (maxGain > 0 && (currentGain <= maxGain - 10.0)) {
+                            // 2. 正盈利回檔條件：當曾達正盈利，且從最高點回檔達 6% 
+                            else if (maxGain > 0 && (currentGain <= maxGain - 6.0)) {
                                 shouldExpire = true;
-                                expireReason = `盈利回檔 10% (高點 +${maxGain.toFixed(2)}%)`;
+                                expireReason = `盈利回檔 6% (高點 +${maxGain.toFixed(2)}%)`;
                             }
 
                             if (shouldExpire) {
@@ -157,35 +165,56 @@ html_content = """<!DOCTYPE html>
                             }
                         }
                     });
-                    let burstCandidates = [];
-                    globalData.forEach(coin => {
+
+                    // 取漲幅榜前 15 名加入追蹤清單
+                    let topGainers = globalData.slice(0, 15);
+                    topGainers.forEach(coin => {
                         let sym = coin.symbol;
-                        if (activeSignals[sym] || expiredSignals[sym]) return;
-                        let record = alertCounts[sym]; if (record && record.count >= 2) return;
-                        if (coin.change24h > -2.0 && coin.lastPrice > 0) {
-                            burstCandidates.push({ coin, score: coin.change24h + (Math.random() * 5) });
-                        }
-                    });
-                    burstCandidates.sort((a, b) => b.score - a.score);
-                    burstCandidates.forEach(item => {
-                        let coin = item.coin, sym = coin.symbol;
-                        if (Object.keys(activeSignals).length < 10) {
+                        if (expiredSignals[sym]) return; // 如果在失效區就不重複捕捉
+                        
+                        if (!activeSignals[sym]) {
                             let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
                             let timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-                            activeSignals[sym] = { symbol: sym, firstAlertPrice: coin.lastPrice, alertTime: timeString, initialOI: initialOI, maxGain: 0.0, score: (7.0 + (Math.random() * 2)).toFixed(1), resonance: Math.floor(Math.random() * 3) + 2 };
-                            if (!alertCounts[sym]) alertCounts[sym] = { count: 1, lastTime: now };
-                            else { alertCounts[sym].count += 1; alertCounts[sym].lastTime = now; }
+                            activeSignals[sym] = { 
+                                symbol: sym, 
+                                firstAlertPrice: coin.lastPrice, 
+                                alertTime: timeString, 
+                                initialOI: initialOI, 
+                                maxGain: 0.0, 
+                                score: coin.change24h.toFixed(2) 
+                            };
                         }
                     });
-                    saveSignals(); renderView();
+
+                    // 清理已經掉出漲幅榜前 30 名的舊標的（避免永遠卡著）
+                    let top30Symbols = globalData.slice(0, 30).map(c => c.symbol);
+                    Object.keys(activeSignals).forEach(sym => {
+                        if (!top30Symbols.includes(sym) && (activeSignals[sym].maxGain || 0) <= 0) {
+                            delete activeSignals[sym];
+                        }
+                    });
+
+                    saveSignals(); 
+                    renderView();
                 }
             } catch (err) { console.error(err); }
         }
+
         function toggleCard(cardElement) { cardElement.classList.toggle('expanded'); }
+
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
-            if (activeKeys.length === 0) activeHtml = '<div class="loading">正在全市場掃描即時噴發標的...</div>';
+            if (activeKeys.length === 0) activeHtml = '<div class="loading">正在掃描漲幅榜強勢幣種...</div>';
             else {
+                // 依照當前動能排序顯示
+                activeKeys.sort((a, b) => {
+                    let cA = globalData.find(c => c.symbol === a)?.lastPrice || 0;
+                    let cB = globalData.find(c => c.symbol === b)?.lastPrice || 0;
+                    let pA = activeSignals[a].firstAlertPrice;
+                    let pB = activeSignals[b].firstAlertPrice;
+                    return ((cB - pB)/pB) - ((cA - pA)/pA);
+                });
+
                 activeKeys.forEach(k => {
                     let sig = activeSignals[k], coinData = globalData.find(c => c.symbol === sig.symbol);
                     if (!coinData) return;
@@ -196,60 +225,56 @@ html_content = """<!DOCTYPE html>
                     let currentOIObj = globalOI[sig.symbol], currentOI = currentOIObj ? currentOIObj.oi : sig.initialOI;
                     let oiDiff = currentOI - sig.initialOI, oiPct = sig.initialOI > 0 ? ((oiDiff / sig.initialOI) * 100).toFixed(2) : "0.00";
                     let isOiPos = oiDiff >= 0, fundingRate = globalFundingRate[sig.symbol] !== undefined ? globalFundingRate[sig.symbol].toFixed(4) : "0.0100";
-                    let isFundingPos = parseFloat(fundingRate) >= 0, netCapitalFlow = (parseFloat(diffPct) * parseFloat(oiPct)).toFixed(2);
-                    let capitalFlowDesc = "資金持平", capitalFlowColor = "var(--text-main)";
-                    if (parseFloat(diffPct) > 0 && parseFloat(oiPct) >= 0) { capitalFlowDesc = "🟢 明確資金淨流入 (多頭主動加倉)"; capitalFlowColor = "var(--green)"; }
-                    else if (parseFloat(diffPct) < 0 && parseFloat(oiPct) > 0) { capitalFlowDesc = "🔴 資金背離 (價跌量增·空頭壓境)"; capitalFlowColor = "var(--red)"; }
-                    else if (parseFloat(diffPct) > 0 && parseFloat(oiPct) < 0) { capitalFlowDesc = "🟡 價格推升但持倉減少 (空頭回補短多)"; capitalFlowColor = "var(--accent)"; }
-                    else { capitalFlowDesc = "⚪ 多頭停損出場 (資金淨流出)"; capitalFlowColor = "var(--text-sub)"; }
+                    let isFundingPos = parseFloat(fundingRate) >= 0;
+
                     activeHtml += `
                         <div class="card" onclick="toggleCard(this)">
                             <div class="row" style="margin-bottom: 8px;">
-                                <span class="badge-active">🚀 即時爆發捕捉 · 警報時間: ${sig.alertTime}</span>
-                                <span class="score-badge">綜合評分 +${sig.score} 分</span>
+                                <span class="badge-active">🚀 漲幅榜追蹤 · 24h漲幅: +${coinData.change24h.toFixed(2)}%</span>
+                                <span class="score-badge">追蹤動能: ${isDiffPos ? '+' : ''}${diffPct}%</span>
                             </div>
                             <div class="row">
                                 <div><span class="coin-title">${sig.symbol}</span> <span style="font-size: 0.75rem; color: var(--text-sub);">OKX 永續</span></div>
                                 <div class="price-box">
                                     <div class="price-val">$${priceStr}</div>
-                                    <div style="font-size: 0.75rem;" class="${isDiffPos ? 'positive' : 'negative'}">追蹤期間動能: ${isDiffPos ? '+' : ''}${diffPct}%</div>
                                 </div>
                             </div>
                             <div class="price-compare-box">
-                                <div>🚨 <b>警報當下點位</b><br><span style="color:var(--text-main); font-weight:bold;">$${alertPriceStr}</span></div>
+                                <div>🚨 <b>捕捉價位</b><br><span style="color:var(--text-main); font-weight:bold;">$${alertPriceStr}</span></div>
                                 <div style="text-align: right;">📊 <b>當前即時價位</b><br><span style="color:var(--text-main); font-weight:bold;">$${priceStr}</span></div>
                             </div>
                             <div class="metrics-grid">
                                 <div class="metric-item">真實持倉量(OI)：<b>${currentOI.toLocaleString()}張</b></div>
                                 <div class="metric-item">OI 變化率：<b class="${isOiPos ? 'positive' : 'negative'}">${isOiPos ? '+' : ''}${oiPct}%</b></div>
                                 <div class="metric-item">資金費率：<b style="color: ${isFundingPos ? 'var(--green)' : 'var(--red)'};">${isFundingPos ? '+' : ''}${fundingRate}%</b></div>
-                                <div class="metric-item">強度數值：<b>${netCapitalFlow}</b></div>
-                                <div class="metric-item" style="grid-column: span 2;">資金流向計算：<b style="color: ${capitalFlowColor}">${capitalFlowDesc}</b></div>
+                                <div class="metric-item">最高盈利記錄：<b style="color: var(--accent);">+${(activeSignals[k].maxGain || 0).toFixed(2)}%</b></div>
                             </div>
                         </div>`;
                 });
             }
             document.getElementById('market-feed').innerHTML = activeHtml;
+
             let expiredHtml = '', expiredKeys = Object.keys(expiredSignals);
-            if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無已失效標的</div>';
+            if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無回檔失效標的</div>';
             else {
                 expiredKeys.forEach(k => {
                     let exp = expiredSignals[k];
                     expiredHtml += `
                         <div class="card expired-card">
                             <div class="row" style="margin-bottom: 6px;">
-                                <span class="badge-expired">⚠️ 已失效 · ${exp.reason || '大戶退場'} (曾高點 +${exp.maxGain}%)</span>
-                                <span style="font-size: 0.72rem; color: var(--text-sub);">${exp.timeStr} 轉弱下架</span>
+                                <span class="badge-expired">⚠️ 已失效 · ${exp.reason} (曾高點 +${exp.maxGain}%)</span>
+                                <span style="font-size: 0.72rem; color: var(--text-sub);">${exp.timeStr} 移出</span>
                             </div>
                             <div class="row">
                                 <div><span class="coin-title">${exp.symbol}</span></div>
-                                <div style="font-size: 0.8rem; color: var(--text-sub);">警報價: $${exp.firstAlertPrice} ➔ 下架價: $${exp.expiredPrice}</div>
+                                <div style="font-size: 0.8rem; color: var(--text-sub);">捕捉價: $${exp.firstAlertPrice} ➔ 離開價: $${exp.expiredPrice}</div>
                             </div>
                         </div>`;
                 });
             }
             document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
+
         fetchOKXData(); setInterval(fetchOKXData, 15000);
     </script>
 </body>
