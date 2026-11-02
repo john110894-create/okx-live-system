@@ -49,7 +49,7 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲幅榜前 15 強追蹤系統</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣追蹤系統</div>
         <div class="gauge-score">實時加密市場掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 6% 移至失效區</div>
     </div>
@@ -61,7 +61,7 @@ html_content = """<!DOCTYPE html>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
         let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_gainers_v2', EXPIRED_KEY = 'okx_gainers_expired_v2';
+        const STORAGE_KEY = 'okx_gainers_v3', EXPIRED_KEY = 'okx_gainers_expired_v3';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -117,18 +117,17 @@ html_content = """<!DOCTYPE html>
                         return { symbol: item.instId.replace('-USDT-SWAP', ''), lastPrice: last, change24h: sod ? ((last - sod) / sod) * 100 : 0 };
                     }).filter(item => !isNaN(item.lastPrice));
 
-                    // 依照 24 小時漲幅由大到小排序
                     globalData.sort((a, b) => b.change24h - a.change24h);
 
                     loadSignals();
                     let now = Date.now(), twentyFourHours = 24 * 60 * 60 * 1000;
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
 
-                    // 檢查目前追蹤中的標的是否觸發止損或回檔 6%
+                    // 檢查追蹤中的標的：只有觸發 -2% 止損或回檔 6% 時才移至失效區
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (!coin) { 
-                            delete activeSignals[sym]; 
+                            return; // 如果暫時找不到資料，保留記錄不刪除
                         } else {
                             let initPrice = activeSignals[sym].firstAlertPrice;
                             let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
@@ -141,12 +140,10 @@ html_content = """<!DOCTYPE html>
                             let shouldExpire = false;
                             let expireReason = "";
 
-                            // 1. 止損條件：跌幅達到 -2%
                             if (currentGain <= -2.0) {
                                 shouldExpire = true;
                                 expireReason = "止損 (-2%)";
                             }
-                            // 2. 正盈利回檔條件：當曾達正盈利，且從最高點回檔達 6% 
                             else if (maxGain > 0 && (currentGain <= maxGain - 6.0)) {
                                 shouldExpire = true;
                                 expireReason = `盈利回檔 6% (高點 +${maxGain.toFixed(2)}%)`;
@@ -167,7 +164,7 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 取漲幅榜前 15 名加入追蹤清單
+                    // 捕捉漲幅榜前 15 名加入追蹤（只要沒進失效區，就會穩定留著顯示當前變動％數）
                     let topGainers = globalData.slice(0, 15);
                     topGainers.forEach(coin => {
                         let sym = coin.symbol;
@@ -187,20 +184,12 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    let top30Symbols = globalData.slice(0, 30).map(c => c.symbol);
-                    Object.keys(activeSignals).forEach(sym => {
-                        if (!top30Symbols.includes(sym) && (activeSignals[sym].maxGain || 0) <= 0) {
-                            delete activeSignals[sym];
-                        }
-                    });
-
                     saveSignals(); 
                     renderView();
                 }
             } catch (err) { console.error(err); }
         }
 
-        // 計算推薦指數 (1 ~ 5 星)
         function getRecommendationStars(change24h, diffPct, oiPct) {
             let score = (change24h * 0.4) + (parseFloat(diffPct) * 0.4) + (parseFloat(oiPct) * 0.2);
             if (score > 15) return "⭐⭐⭐⭐⭐ (極強推薦)";
