@@ -29,6 +29,7 @@ html_content = """<!DOCTYPE html>
         .tab-btn { background: #161a1e; border: 1px solid var(--card-border); color: var(--text-sub); padding: 8px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; cursor: pointer; white-space: nowrap; transition: 0.2s; display: flex; align-items: center; gap: 4px; }
         .tab-btn.active { background: #2b313a; border-color: var(--accent); color: var(--text-main); }
         .badge-active { background: rgba(14, 203, 129, 0.15); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
+        .badge-repeat { background: rgba(240, 185, 11, 0.2); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; margin-left: 4px; }
         .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .score-badge { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: bold; }
         .rating-stars { color: var(--accent); font-size: 0.85rem; font-weight: bold; }
@@ -49,9 +50,9 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲追蹤系統</div>
-        <div class="gauge-score">實時加密市場掃描中</div>
-        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 6% 移至失效區</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲幅榜前 15 強追蹤系統</div>
+        <div class="gauge-score">實時加密市場掃描中 (含重複警報識別)</div>
+        <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 移至失效區</div>
     </div>
     <div class="tab-container">
         <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 漲幅榜強勢追蹤 (Top 15)</div>
@@ -60,8 +61,8 @@ html_content = """<!DOCTYPE html>
     <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在擷取 OKX 漲幅榜前 15 強...</div></div></div>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
-        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_gainers_v4', EXPIRED_KEY = 'okx_gainers_expired_v4';
+        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
+        const STORAGE_KEY = 'okx_gainers_v7', EXPIRED_KEY = 'okx_gainers_expired_v7', COUNTS_KEY = 'okx_gainers_counts_v7';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -73,10 +74,12 @@ html_content = """<!DOCTYPE html>
         function loadSignals() {
             let saved = localStorage.getItem(STORAGE_KEY); if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
             let savedExpired = localStorage.getItem(EXPIRED_KEY); if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
+            let savedCounts = localStorage.getItem(COUNTS_KEY); if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
         }
         function saveSignals() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeSignals));
             localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
+            localStorage.setItem(COUNTS_KEY, JSON.stringify(alertCounts));
         }
         async function fetchOKXOpenInterest() {
             try {
@@ -122,13 +125,12 @@ html_content = """<!DOCTYPE html>
                     loadSignals();
                     let now = Date.now(), twentyFourHours = 24 * 60 * 60 * 1000;
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
+                    Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]; });
 
-                    // 檢查追蹤中的標的風控條件 (-2% 止損或回檔 6%)
+                    // 1. 檢查現有追蹤標的是否觸發風控 (-2% 止損或回檔 10%)
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
-                        if (!coin) { 
-                            return; 
-                        } else {
+                        if (coin) {
                             let initPrice = activeSignals[sym].firstAlertPrice;
                             let currentGain = ((coin.lastPrice - initPrice) / initPrice) * 100;
                             
@@ -144,9 +146,9 @@ html_content = """<!DOCTYPE html>
                                 shouldExpire = true;
                                 expireReason = "止損 (-2%)";
                             }
-                            else if (maxGain > 0 && (currentGain <= maxGain - 6.0)) {
+                            else if (maxGain > 0 && (currentGain <= maxGain - 10.0)) {
                                 shouldExpire = true;
-                                expireReason = `盈利回檔 6% (高點 +${maxGain.toFixed(2)}%)`;
+                                expireReason = `盈利回檔 10% (高點 +${maxGain.toFixed(2)}%)`;
                             }
 
                             if (shouldExpire) {
@@ -164,8 +166,16 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 捕捉漲幅榜前 15 名加入追蹤
+                    // 2. 嚴格鎖定：只取當前漲幅榜前 15 名
                     let topGainers = globalData.slice(0, 15);
+                    let topSymbols = topGainers.map(c => c.symbol);
+
+                    Object.keys(activeSignals).forEach(sym => {
+                        if (!topSymbols.includes(sym) && (activeSignals[sym].maxGain || 0) < 1.0) {
+                            delete activeSignals[sym];
+                        }
+                    });
+
                     topGainers.forEach(coin => {
                         let sym = coin.symbol;
                         if (expiredSignals[sym]) return;
@@ -173,16 +183,43 @@ html_content = """<!DOCTYPE html>
                         if (!activeSignals[sym]) {
                             let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
                             let timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                            
+                            // 記錄或更新警報次數
+                            if (!alertCounts[sym]) {
+                                alertCounts[sym] = { count: 1, lastTime: now };
+                            } else {
+                                alertCounts[sym].count += 1;
+                                alertCounts[sym].lastTime = now;
+                            }
+
                             activeSignals[sym] = { 
                                 symbol: sym, 
                                 firstAlertPrice: coin.lastPrice, 
                                 alertTime: timeString, 
                                 initialOI: initialOI, 
                                 maxGain: 0.0, 
-                                score: coin.change24h.toFixed(2) 
+                                score: coin.change24h.toFixed(2),
+                                alertCount: alertCounts[sym].count
                             };
+                        } else {
+                            // 如果本來就在追蹤，確保其 alertCount 正確同步
+                            if (alertCounts[sym]) {
+                                activeSignals[sym].alertCount = alertCounts[sym].count;
+                            }
                         }
                     });
+
+                    let activeKeys = Object.keys(activeSignals);
+                    if (activeKeys.length > 15) {
+                        activeKeys.sort((a, b) => {
+                            let cA = globalData.find(c => c.symbol === a)?.change24h || 0;
+                            let cB = globalData.find(c => c.symbol === b)?.change24h || 0;
+                            return cB - cA;
+                        });
+                        for (let i = 15; i < activeKeys.length; i++) {
+                            delete activeSignals[activeKeys[i]];
+                        }
+                    }
 
                     saveSignals(); 
                     renderView();
@@ -226,11 +263,16 @@ html_content = """<!DOCTYPE html>
                     let isFundingPos = parseFloat(fundingRate) >= 0;
 
                     let stars = getRecommendationStars(coinData.change24h, diffPct, oiPct);
+                    let count = sig.alertCount || 1;
+                    let repeatBadge = count >= 2 ? `<span class="badge-repeat">⚠️ 第 ${count} 次警報</span>` : '';
 
                     activeHtml += `
                         <div class="card" onclick="toggleCard(this)">
                             <div class="row" style="margin-bottom: 6px;">
-                                <span class="badge-active">🚀 漲幅榜 · 24h: +${coinData.change24h.toFixed(2)}%</span>
+                                <div>
+                                    <span class="badge-active">🚀 漲幅榜 · 24h: +${coinData.change24h.toFixed(2)}%</span>
+                                    ${repeatBadge}
+                                </div>
                                 <span class="rating-stars">${stars}</span>
                             </div>
                             <div class="row">
