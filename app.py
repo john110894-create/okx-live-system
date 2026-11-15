@@ -1,15 +1,52 @@
 import http.server
+import json
 import os
 import socketserver
+import threading
+import urllib.request
 
 PORT = int(os.environ.get("PORT", 8080))
+
+# 快取 BingX 數據的字典
+bingx_cache = {"tickers": [], "premium": []}
+
+
+def fetch_bingx_background():
+  import time
+  while True:
+    try:
+      # 1. 抓取 BingX 合約 Ticker (24h 行情)
+      req_ticker = urllib.request.Request(
+          "https://open-api.bingx.com/openApi/swap/v2/quote/ticker",
+          headers={"User-Agent": "Mozilla/5.0"},
+      )
+      with urllib.request.urlopen(req_ticker, timeout=5) as res:
+        ticker_data = json.loads(res.read().decode("utf-8"))
+
+      # 2. 抓取 BingX 資金費率
+      req_prem = urllib.request.Request(
+          "https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex",
+          headers={"User-Agent": "Mozilla/5.0"},
+      )
+      with urllib.request.urlopen(req_prem, timeout=5) as res:
+        prem_data = json.loads(res.read().decode("utf-8"))
+
+      if ticker_data.get("code") == 0:
+        bingx_cache["tickers"] = ticker_data.get("data", [])
+      if prem_data.get("code") == 0:
+        bingx_cache["premium"] = prem_data.get("data", [])
+    except Exception as e:
+      print("背景抓取 BingX 失敗:", e)
+
+    time.sleep(10)  # 每 10 秒背景更新一次
+
 
 html_content = """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OKX 漲幅榜前 15 大強勢追蹤系統</title>
+    <title>BingX 飆漲幣精準追蹤系統</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -31,7 +68,6 @@ html_content = """<!DOCTYPE html>
         .badge-active { background: rgba(14, 203, 129, 0.15); color: var(--green); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .badge-repeat { background: rgba(240, 185, 11, 0.2); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; margin-left: 4px; }
         .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
-        .score-badge { background: rgba(240, 185, 11, 0.15); color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: bold; }
         .rating-stars { color: var(--accent); font-size: 0.85rem; font-weight: bold; }
         .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer; transition: 0.2s; }
         .card.expired-card { background-color: #121519; border: 1px solid rgba(246, 70, 93, 0.3); }
@@ -50,19 +86,19 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 OKX 加密貨幣漲幅榜前 15 強追蹤系統</div>
-        <div class="gauge-score">實時加密市場掃描中 (含重複警報識別)</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 飆漲幣精準追蹤系統 (前50強篩選 · 最多15個)</div>
+        <div class="gauge-score">實時飆漲動能掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 移至失效區</div>
     </div>
     <div class="tab-container">
-        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 漲幅榜強勢追蹤 (Top 15)</div>
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 飆漲動能追蹤 (嚴選 Top)</div>
         <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 迴避</div>
     </div>
-    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在擷取 OKX 漲幅榜前 15 強...</div></div></div>
+    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在透過後端取得 BingX 前 50 強漲幅榜...</div></div></div>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
-        let globalData = [], globalOI = {}, globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'okx_gainers_v7', EXPIRED_KEY = 'okx_gainers_expired_v7', COUNTS_KEY = 'okx_gainers_counts_v7';
+        let globalData = [], globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
+        const STORAGE_KEY = 'bingx_pumping_v1', EXPIRED_KEY = 'bingx_pumping_expired_v1', COUNTS_KEY = 'bingx_pumping_counts_v1';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -81,45 +117,31 @@ html_content = """<!DOCTYPE html>
             localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
             localStorage.setItem(COUNTS_KEY, JSON.stringify(alertCounts));
         }
-        async function fetchOKXOpenInterest() {
-            try {
-                const res = await fetch('https://www.okx.com/api/v5/public/open-interest?instType=SWAP');
-                const json = await res.json();
-                if (json.code === '0' && json.data) {
-                    json.data.forEach(item => {
-                        if (item.instId.endsWith('-USDT-SWAP')) {
-                            let sym = item.instId.replace('-USDT-SWAP', '');
-                            globalOI[sym] = { oi: parseFloat(item.oi), oiCcy: parseFloat(item.oiCcy) };
-                        }
-                    });
-                }
-            } catch (e) { console.error(e); }
-        }
-        async function fetchOKXFundingRate() {
-            try {
-                const res = await fetch('https://www.okx.com/api/v5/public/funding-rate?instType=SWAP');
-                const json = await res.json();
-                if (json.code === '0' && json.data) {
-                    json.data.forEach(item => {
-                        if (item.instId.endsWith('-USDT-SWAP')) {
-                            let sym = item.instId.replace('-USDT-SWAP', '');
-                            globalFundingRate[sym] = parseFloat(item.fundingRate) * 100;
-                        }
-                    });
-                }
-            } catch (e) { console.error(e); }
-        }
-        async function fetchOKXData() {
-            try {
-                await Promise.all([fetchOKXOpenInterest(), fetchOKXFundingRate()]);
-                const response = await fetch('https://www.okx.com/api/v5/market/tickers?instType=SWAP');
-                const result = await response.json();
-                if (result.code === '0' && result.data) {
-                    globalData = result.data.filter(item => item.instId.endsWith('-USDT-SWAP')).map(item => {
-                        let last = parseFloat(item.last), sod = parseFloat(item.sodUtc0);
-                        return { symbol: item.instId.replace('-USDT-SWAP', ''), lastPrice: last, change24h: sod ? ((last - sod) / sod) * 100 : 0 };
-                    }).filter(item => !isNaN(item.lastPrice));
 
+        async function fetchBingXData() {
+            try {
+                const res = await fetch('/api/bingx');
+                const json = await res.json();
+                
+                if (json.premium) {
+                    let pData = Array.isArray(json.premium) ? json.premium : [json.premium];
+                    pData.forEach(item => {
+                        if (item.symbol && item.symbol.endsWith('-USDT')) {
+                            globalFundingRate[item.symbol] = parseFloat(item.lastFundingRate || 0) * 100;
+                        }
+                    });
+                }
+
+                if (json.tickers) {
+                    let rawTickers = Array.isArray(json.tickers) ? json.tickers : [json.tickers];
+                    globalData = rawTickers.filter(item => item.symbol && item.symbol.endsWith('-USDT')).map(item => {
+                        let last = parseFloat(item.lastPrice || item.close || 0);
+                        let prev24h = parseFloat(item.prevClosePrice || item.openPrice || last);
+                        let change = prev24h > 0 ? ((last - prev24h) / prev24h) * 100 : parseFloat(item.priceChangePercent || 0);
+                        return { symbol: item.symbol, lastPrice: last, change24h: change };
+                    }).filter(item => !isNaN(item.lastPrice) && item.lastPrice > 0);
+
+                    // 依照 24 小時漲幅由大到小排序
                     globalData.sort((a, b) => b.change24h - a.change24h);
 
                     loadSignals();
@@ -166,25 +188,25 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 2. 嚴格鎖定：只取當前漲幅榜前 15 名
-                    let topGainers = globalData.slice(0, 15);
-                    let topSymbols = topGainers.map(c => c.symbol);
+                    // 2. 從前 50 強中嚴格篩選飆漲幣（設定門檻：24h漲幅須大於 3%）
+                    let top50Pool = globalData.slice(0, 50);
+                    let qualifiedCoins = top50Pool.filter(coin => coin.change24h >= 3.0 && !expiredSignals[coin.symbol]);
+
+                    // 3. 寧缺勿濫，最多取 15 個
+                    let selectedCoins = qualifiedCoins.slice(0, 15);
+                    let selectedSymbols = selectedCoins.map(c => c.symbol);
 
                     Object.keys(activeSignals).forEach(sym => {
-                        if (!topSymbols.includes(sym) && (activeSignals[sym].maxGain || 0) < 1.0) {
+                        if (!selectedSymbols.includes(sym) && (activeSignals[sym].maxGain || 0) < 1.0) {
                             delete activeSignals[sym];
                         }
                     });
 
-                    topGainers.forEach(coin => {
+                    selectedCoins.forEach(coin => {
                         let sym = coin.symbol;
-                        if (expiredSignals[sym]) return;
-                        
                         if (!activeSignals[sym]) {
-                            let initialOI = globalOI[sym] ? globalOI[sym].oi : 10000;
                             let timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
                             
-                            // 記錄或更新警報次數
                             if (!alertCounts[sym]) {
                                 alertCounts[sym] = { count: 1, lastTime: now };
                             } else {
@@ -196,13 +218,11 @@ html_content = """<!DOCTYPE html>
                                 symbol: sym, 
                                 firstAlertPrice: coin.lastPrice, 
                                 alertTime: timeString, 
-                                initialOI: initialOI, 
                                 maxGain: 0.0, 
                                 score: coin.change24h.toFixed(2),
                                 alertCount: alertCounts[sym].count
                             };
                         } else {
-                            // 如果本來就在追蹤，確保其 alertCount 正確同步
                             if (alertCounts[sym]) {
                                 activeSignals[sym].alertCount = alertCounts[sym].count;
                             }
@@ -224,14 +244,14 @@ html_content = """<!DOCTYPE html>
                     saveSignals(); 
                     renderView();
                 }
-            } catch (err) { console.error(err); }
+            } catch (err) { console.error("BingX 數據載入錯誤:", err); }
         }
 
-        function getRecommendationStars(change24h, diffPct, oiPct) {
-            let score = (change24h * 0.4) + (parseFloat(diffPct) * 0.4) + (parseFloat(oiPct) * 0.2);
-            if (score > 15) return "⭐⭐⭐⭐⭐ (極強推薦)";
-            if (score > 10) return "⭐⭐⭐⭐ (強勢加倉)";
-            if (score > 5)  return "⭐⭐⭐ (逢低關注)";
+        function getRecommendationStars(change24h, diffPct) {
+            let score = (change24h * 0.4) + (parseFloat(diffPct) * 0.6);
+            if (score > 12) return "⭐⭐⭐⭐⭐ (極強飆漲)";
+            if (score > 8)  return "⭐⭐⭐⭐ (強勢追價)";
+            if (score > 4)  return "⭐⭐⭐ (波段關注)";
             if (score > 0)  return "⭐⭐ (震盪偏多)";
             return "⭐ (保守觀望)";
         }
@@ -240,14 +260,12 @@ html_content = """<!DOCTYPE html>
 
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
-            if (activeKeys.length === 0) activeHtml = '<div class="loading">正在掃描漲幅榜強勢幣種...</div>';
+            if (activeKeys.length === 0) activeHtml = '<div class="loading">目前 BingX 前 50 強中暫無符合條件的飆漲幣（寧缺勿濫）...</div>';
             else {
                 activeKeys.sort((a, b) => {
-                    let cA = globalData.find(c => c.symbol === a)?.lastPrice || 0;
-                    let cB = globalData.find(c => c.symbol === b)?.lastPrice || 0;
-                    let pA = activeSignals[a].firstAlertPrice;
-                    let pB = activeSignals[b].firstAlertPrice;
-                    return ((cB - pB)/pB) - ((cA - pA)/pA);
+                    let cA = globalData.find(c => c.symbol === a)?.change24h || 0;
+                    let cB = globalData.find(c => c.symbol === b)?.change24h || 0;
+                    return cB - cA;
                 });
 
                 activeKeys.forEach(k => {
@@ -257,12 +275,10 @@ html_content = """<!DOCTYPE html>
                     let diffPct = (((currentPrice - firstAlert) / firstAlert) * 100).toFixed(2), isDiffPos = diffPct >= 0;
                     let priceStr = currentPrice < 1 ? currentPrice.toFixed(4) : currentPrice.toFixed(2);
                     let alertPriceStr = firstAlert < 1 ? firstAlert.toFixed(4) : firstAlert.toFixed(2);
-                    let currentOIObj = globalOI[sig.symbol], currentOI = currentOIObj ? currentOIObj.oi : sig.initialOI;
-                    let oiDiff = currentOI - sig.initialOI, oiPct = sig.initialOI > 0 ? ((oiDiff / sig.initialOI) * 100).toFixed(2) : "0.00";
-                    let isOiPos = oiDiff >= 0, fundingRate = globalFundingRate[sig.symbol] !== undefined ? globalFundingRate[sig.symbol].toFixed(4) : "0.0100";
+                    let fundingRate = globalFundingRate[sig.symbol] !== undefined ? globalFundingRate[sig.symbol].toFixed(4) : "0.0100";
                     let isFundingPos = parseFloat(fundingRate) >= 0;
 
-                    let stars = getRecommendationStars(coinData.change24h, diffPct, oiPct);
+                    let stars = getRecommendationStars(coinData.change24h, diffPct);
                     let count = sig.alertCount || 1;
                     let repeatBadge = count >= 2 ? `<span class="badge-repeat">⚠️ 第 ${count} 次警報</span>` : '';
 
@@ -270,13 +286,13 @@ html_content = """<!DOCTYPE html>
                         <div class="card" onclick="toggleCard(this)">
                             <div class="row" style="margin-bottom: 6px;">
                                 <div>
-                                    <span class="badge-active">🚀 漲幅榜 · 24h: +${coinData.change24h.toFixed(2)}%</span>
+                                    <span class="badge-active">🚀 飆漲動能 · 24h: +${coinData.change24h.toFixed(2)}%</span>
                                     ${repeatBadge}
                                 </div>
                                 <span class="rating-stars">${stars}</span>
                             </div>
                             <div class="row">
-                                <div><span class="coin-title">${sig.symbol}</span> <span style="font-size: 0.75rem; color: var(--text-sub);">OKX 永續</span></div>
+                                <div><span class="coin-title">${sig.symbol}</span> <span style="font-size: 0.75rem; color: var(--text-sub);">BingX 永續</span></div>
                                 <div class="price-box">
                                     <div class="price-val">$${priceStr}</div>
                                 </div>
@@ -287,9 +303,8 @@ html_content = """<!DOCTYPE html>
                             </div>
                             <div class="metrics-grid">
                                 <div class="metric-item">追蹤動能：<b class="${isDiffPos ? 'positive' : 'negative'}">${isDiffPos ? '+' : ''}${diffPct}%</b></div>
-                                <div class="metric-item">OI 變化率：<b class="${isOiPos ? 'positive' : 'negative'}">${isOiPos ? '+' : ''}${oiPct}%</b></div>
                                 <div class="metric-item">資金費率：<b style="color: ${isFundingPos ? 'var(--green)' : 'var(--red)'};">${isFundingPos ? '+' : ''}${fundingRate}%</b></div>
-                                <div class="metric-item">最高盈利記錄：<b style="color: var(--accent);">+${(activeSignals[k].maxGain || 0).toFixed(2)}%</b></div>
+                                <div class="metric-item" style="grid-column: span 2;">最高盈利記錄：<b style="color: var(--accent);">+${(activeSignals[k].maxGain || 0).toFixed(2)}%</b></div>
                             </div>
                         </div>`;
                 });
@@ -317,7 +332,7 @@ html_content = """<!DOCTYPE html>
             document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
 
-        fetchOKXData(); setInterval(fetchOKXData, 15000);
+        fetchBingXData(); setInterval(fetchBingXData, 15000);
     </script>
 </body>
 </html>
@@ -327,14 +342,23 @@ html_content = """<!DOCTYPE html>
 class MyHandler(http.server.SimpleHTTPRequestHandler):
 
   def do_GET(self):
-    self.send_response(200)
-    self.send_header("Content-type", "text/html; charset=utf-8")
-    self.end_headers()
-    self.wfile.write(html_content.encode("utf-8"))
+    if self.path == "/api/bingx":
+      self.send_response(200)
+      self.send_header("Content-type", "application/json; charset=utf-8")
+      self.end_headers()
+      self.wfile.write(json.dumps(bingx_cache).encode("utf-8"))
+    else:
+      self.send_response(200)
+      self.send_header("Content-type", "text/html; charset=utf-8")
+      self.end_headers()
+      self.wfile.write(html_content.encode("utf-8"))
 
 
 if __name__ == "__main__":
+  bg_thread = threading.Thread(target=fetch_bingx_background, daemon=True)
+  bg_thread.start()
+
   socketserver.TCPServer.allow_reuse_address = True
   with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-    print(f"🚀 雲端伺服器已在 Port {PORT} 啟動！")
+    print(f"🚀 BingX 飆漲追蹤雲端伺服器已在 Port {PORT} 啟動！")
     httpd.serve_forever()
