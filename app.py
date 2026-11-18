@@ -7,7 +7,6 @@ import urllib.request
 
 PORT = int(os.environ.get("PORT", 8080))
 
-# 快取 BingX 數據的字典
 bingx_cache = {"tickers": [], "premium": []}
 
 
@@ -15,7 +14,6 @@ def fetch_bingx_background():
   import time
   while True:
     try:
-      # 1. 抓取 BingX 合約 Ticker (24h 行情)
       req_ticker = urllib.request.Request(
           "https://open-api.bingx.com/openApi/swap/v2/quote/ticker",
           headers={"User-Agent": "Mozilla/5.0"},
@@ -23,7 +21,6 @@ def fetch_bingx_background():
       with urllib.request.urlopen(req_ticker, timeout=5) as res:
         ticker_data = json.loads(res.read().decode("utf-8"))
 
-      # 2. 抓取 BingX 資金費率
       req_prem = urllib.request.Request(
           "https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex",
           headers={"User-Agent": "Mozilla/5.0"},
@@ -38,7 +35,7 @@ def fetch_bingx_background():
     except Exception as e:
       print("背景抓取 BingX 失敗:", e)
 
-    time.sleep(10)  # 每 10 秒背景更新一次
+    time.sleep(10)
 
 
 html_content = """<!DOCTYPE html>
@@ -46,7 +43,7 @@ html_content = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BingX 飆漲幣精準追蹤系統</title>
+    <title>BingX 飆漲幣精準追蹤系統 (自動即時更新)</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -86,19 +83,19 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 飆漲幣精準追蹤系統 (前50強篩選 · 最多15個)</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 飆漲幣精準追蹤系統 (自動即時更新)</div>
         <div class="gauge-score">實時飆漲動能掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 移至失效區</div>
     </div>
     <div class="tab-container">
-        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 飆漲動能追蹤 (嚴選 Top)</div>
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 飆漲動能追蹤 (Top 8)</div>
         <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 迴避</div>
     </div>
-    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在透過後端取得 BingX 前 50 強漲幅榜...</div></div></div>
+    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在載入本地快取與市場數據...</div></div></div>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <script>
         let globalData = [], globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'bingx_pumping_v1', EXPIRED_KEY = 'bingx_pumping_expired_v1', COUNTS_KEY = 'bingx_pumping_counts_v1';
+        const STORAGE_KEY = 'bingx_pumping_v10', EXPIRED_KEY = 'bingx_pumping_expired_v10', COUNTS_KEY = 'bingx_pumping_counts_v10';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -107,16 +104,25 @@ html_content = """<!DOCTYPE html>
             document.getElementById('view-tracking').classList.toggle('active-view', tabName === 'tracking');
             document.getElementById('view-expired').classList.toggle('active-view', tabName === 'expired');
         }
+
         function loadSignals() {
-            let saved = localStorage.getItem(STORAGE_KEY); if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
-            let savedExpired = localStorage.getItem(EXPIRED_KEY); if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
-            let savedCounts = localStorage.getItem(COUNTS_KEY); if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
+            let saved = localStorage.getItem(STORAGE_KEY); 
+            if (saved) { try { activeSignals = JSON.parse(saved); } catch(e) { activeSignals = {}; } }
+            let savedExpired = localStorage.getItem(EXPIRED_KEY); 
+            if (savedExpired) { try { expiredSignals = JSON.parse(savedExpired); } catch(e) { expiredSignals = {}; } }
+            let savedCounts = localStorage.getItem(COUNTS_KEY); 
+            if (savedCounts) { try { alertCounts = JSON.parse(savedCounts); } catch(e) { alertCounts = {}; } }
         }
+
         function saveSignals() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(activeSignals));
             localStorage.setItem(EXPIRED_KEY, JSON.stringify(expiredSignals));
             localStorage.setItem(COUNTS_KEY, JSON.stringify(alertCounts));
         }
+
+        // 頁面一載入立刻讀取快取並渲染畫面
+        loadSignals();
+        renderView();
 
         async function fetchBingXData() {
             try {
@@ -141,7 +147,6 @@ html_content = """<!DOCTYPE html>
                         return { symbol: item.symbol, lastPrice: last, change24h: change };
                     }).filter(item => !isNaN(item.lastPrice) && item.lastPrice > 0);
 
-                    // 依照 24 小時漲幅由大到小排序
                     globalData.sort((a, b) => b.change24h - a.change24h);
 
                     loadSignals();
@@ -149,7 +154,7 @@ html_content = """<!DOCTYPE html>
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
                     Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]; });
 
-                    // 1. 檢查現有追蹤標的是否觸發風控 (-2% 止損或回檔 10%)
+                    // 風控檢查
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (coin) {
@@ -188,12 +193,10 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 2. 從前 50 強中嚴格篩選飆漲幣（設定門檻：24h漲幅須大於 3%）
+                    // 篩選與捕捉 Top 8
                     let top50Pool = globalData.slice(0, 50);
                     let qualifiedCoins = top50Pool.filter(coin => coin.change24h >= 3.0 && !expiredSignals[coin.symbol]);
-
-                    // 3. 寧缺勿濫，最多取 15 個
-                    let selectedCoins = qualifiedCoins.slice(0, 15);
+                    let selectedCoins = qualifiedCoins.slice(0, 8);
                     let selectedSymbols = selectedCoins.map(c => c.symbol);
 
                     Object.keys(activeSignals).forEach(sym => {
@@ -230,13 +233,13 @@ html_content = """<!DOCTYPE html>
                     });
 
                     let activeKeys = Object.keys(activeSignals);
-                    if (activeKeys.length > 15) {
+                    if (activeKeys.length > 8) {
                         activeKeys.sort((a, b) => {
                             let cA = globalData.find(c => c.symbol === a)?.change24h || 0;
                             let cB = globalData.find(c => c.symbol === b)?.change24h || 0;
                             return cB - cA;
                         });
-                        for (let i = 15; i < activeKeys.length; i++) {
+                        for (let i = 8; i < activeKeys.length; i++) {
                             delete activeSignals[activeKeys[i]];
                         }
                     }
@@ -247,8 +250,11 @@ html_content = """<!DOCTYPE html>
             } catch (err) { console.error("BingX 數據載入錯誤:", err); }
         }
 
-        function getRecommendationStars(change24h, diffPct) {
-            let score = (change24h * 0.4) + (parseFloat(diffPct) * 0.6);
+        function getScoreValue(change24h, diffPct) {
+            return (change24h * 0.4) + (parseFloat(diffPct) * 0.6);
+        }
+
+        function getRecommendationStars(score) {
             if (score > 12) return "⭐⭐⭐⭐⭐ (極強飆漲)";
             if (score > 8)  return "⭐⭐⭐⭐ (強勢追價)";
             if (score > 4)  return "⭐⭐⭐ (波段關注)";
@@ -260,17 +266,25 @@ html_content = """<!DOCTYPE html>
 
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
-            if (activeKeys.length === 0) activeHtml = '<div class="loading">目前 BingX 前 50 強中暫無符合條件的飆漲幣（寧缺勿濫）...</div>';
-            else {
+            if (activeKeys.length === 0) {
+                // 如果快取裡剛好沒有，顯示正在掃描但不清空版面
+                if (Object.keys(activeSignals).length === 0) {
+                    activeHtml = '<div class="loading">正在掃描 BingX 市場數據，請稍候...</div>';
+                }
+            } else {
                 activeKeys.sort((a, b) => {
-                    let cA = globalData.find(c => c.symbol === a)?.change24h || 0;
-                    let cB = globalData.find(c => c.symbol === b)?.change24h || 0;
-                    return cB - cA;
+                    let coinA = globalData.find(c => c.symbol === a) || {change24h: 0, lastPrice: 0};
+                    let coinB = globalData.find(c => c.symbol === b) || {change24h: 0, lastPrice: 0};
+                    let pA = activeSignals[a].firstAlertPrice;
+                    let pB = activeSignals[b].firstAlertPrice;
+                    let diffA = globalData.length > 0 ? ((coinA.lastPrice - pA)/pA)*100 : 0;
+                    let diffB = globalData.length > 0 ? ((coinB.lastPrice - pB)/pB)*100 : 0;
+                    return getScoreValue(coinB.change24h, diffB) - getScoreValue(coinA.change24h, diffA);
                 });
 
                 activeKeys.forEach(k => {
-                    let sig = activeSignals[k], coinData = globalData.find(c => c.symbol === sig.symbol);
-                    if (!coinData) return;
+                    let sig = activeSignals[k];
+                    let coinData = globalData.find(c => c.symbol === sig.symbol) || { lastPrice: sig.firstAlertPrice, change24h: parseFloat(sig.score) };
                     let currentPrice = coinData.lastPrice, firstAlert = parseFloat(sig.firstAlertPrice);
                     let diffPct = (((currentPrice - firstAlert) / firstAlert) * 100).toFixed(2), isDiffPos = diffPct >= 0;
                     let priceStr = currentPrice < 1 ? currentPrice.toFixed(4) : currentPrice.toFixed(2);
@@ -278,7 +292,8 @@ html_content = """<!DOCTYPE html>
                     let fundingRate = globalFundingRate[sig.symbol] !== undefined ? globalFundingRate[sig.symbol].toFixed(4) : "0.0100";
                     let isFundingPos = parseFloat(fundingRate) >= 0;
 
-                    let stars = getRecommendationStars(coinData.change24h, diffPct);
+                    let scoreVal = getScoreValue(coinData.change24h, diffPct);
+                    let stars = getRecommendationStars(scoreVal);
                     let count = sig.alertCount || 1;
                     let repeatBadge = count >= 2 ? `<span class="badge-repeat">⚠️ 第 ${count} 次警報</span>` : '';
 
@@ -309,7 +324,9 @@ html_content = """<!DOCTYPE html>
                         </div>`;
                 });
             }
-            document.getElementById('market-feed').innerHTML = activeHtml;
+            if(activeHtml) {
+                document.getElementById('market-feed').innerHTML = activeHtml;
+            }
 
             let expiredHtml = '', expiredKeys = Object.keys(expiredSignals);
             if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無回檔失效標的</div>';
@@ -332,7 +349,9 @@ html_content = """<!DOCTYPE html>
             document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
 
-        fetchBingXData(); setInterval(fetchBingXData, 15000);
+        // 頁面打開立刻抓取一次，之後每 10 秒自動更新
+        fetchBingXData(); 
+        setInterval(fetchBingXData, 10000);
     </script>
 </body>
 </html>
@@ -360,5 +379,5 @@ if __name__ == "__main__":
 
   socketserver.TCPServer.allow_reuse_address = True
   with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-    print(f"🚀 BingX 飆漲追蹤雲端伺服器已在 Port {PORT} 啟動！")
+    print(f"🚀 BingX 8強自動更新追蹤伺服器已在 Port {PORT} 啟動！")
     httpd.serve_forever()
