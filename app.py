@@ -43,7 +43,7 @@ html_content = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BingX 飆漲幣精準追蹤系統 (自動即時更新)</title>
+    <title>BingX 飆漲幣精準追蹤系統 (Top 10 + 每月覆盤)</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -66,8 +66,10 @@ html_content = """<!DOCTYPE html>
         .badge-repeat { background: rgba(240, 185, 11, 0.2); color: var(--accent); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; margin-left: 4px; }
         .badge-expired { background: rgba(246, 70, 93, 0.15); color: var(--red); padding: 3px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: bold; }
         .rating-stars { color: var(--accent); font-size: 0.85rem; font-weight: bold; }
-        .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer; transition: 0.2s; }
+        .card { background-color: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; transition: 0.2s; }
         .card.expired-card { background-color: #121519; border: 1px solid rgba(246, 70, 93, 0.3); }
+        .monthly-card { background: #161a1e; border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+        .monthly-title { font-size: 1.1rem; font-weight: bold; color: var(--accent); margin-bottom: 8px; border-bottom: 1px solid var(--card-border); padding-bottom: 6px; }
         .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .coin-title { font-size: 1.15rem; font-weight: bold; }
         .price-val { font-size: 1.1rem; font-weight: bold; }
@@ -83,26 +85,31 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 飆漲幣精準追蹤系統 (自動即時更新)</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 飆漲幣精準追蹤系統 (Top 10 + 每月覆盤)</div>
         <div class="gauge-score">實時飆漲動能掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 移至失效區</div>
     </div>
     <div class="tab-container">
-        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 飆漲動能追蹤 (Top 8)</div>
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 飆漲動能追蹤 (Top 10)</div>
         <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 迴避</div>
+        <div class="tab-btn" id="tab-monthly" onclick="switchView('monthly')">📊 每月覆盤統計</div>
     </div>
-    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在載入本地快取與市場數據...</div></div></div>
+    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在載入市場數據與同步動能...</div></div></div>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
+    <div id="view-monthly" class="view-section"><div id="monthly-feed"><div class="loading">正在統計每月表現...</div></div></div>
     <script>
         let globalData = [], globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
-        const STORAGE_KEY = 'bingx_pumping_v10', EXPIRED_KEY = 'bingx_pumping_expired_v10', COUNTS_KEY = 'bingx_pumping_counts_v10';
+        const STORAGE_KEY = 'bingx_pumping_v11', EXPIRED_KEY = 'bingx_pumping_expired_v11', COUNTS_KEY = 'bingx_pumping_counts_v11';
 
         function switchView(tabName) {
             currentTab = tabName;
             document.getElementById('tab-tracking').classList.toggle('active', tabName === 'tracking');
             document.getElementById('tab-expired').classList.toggle('active', tabName === 'expired');
+            document.getElementById('tab-monthly').classList.toggle('active', tabName === 'monthly');
             document.getElementById('view-tracking').classList.toggle('active-view', tabName === 'tracking');
             document.getElementById('view-expired').classList.toggle('active-view', tabName === 'expired');
+            document.getElementById('view-monthly').classList.toggle('active-view', tabName === 'monthly');
+            if(tabName === 'monthly') renderMonthlyStats();
         }
 
         function loadSignals() {
@@ -120,7 +127,6 @@ html_content = """<!DOCTYPE html>
             localStorage.setItem(COUNTS_KEY, JSON.stringify(alertCounts));
         }
 
-        // 頁面一載入立刻讀取快取並渲染畫面
         loadSignals();
         renderView();
 
@@ -154,7 +160,7 @@ html_content = """<!DOCTYPE html>
                     Object.keys(expiredSignals).forEach(sym => { if (now - expiredSignals[sym].timestamp > twentyFourHours) delete expiredSignals[sym]; });
                     Object.keys(alertCounts).forEach(sym => { if (now - alertCounts[sym].lastTime > twentyFourHours) delete alertCounts[sym]; });
 
-                    // 風控檢查
+                    // 風控與記錄最高盈利
                     Object.keys(activeSignals).forEach(sym => {
                         let coin = globalData.find(c => c.symbol === sym);
                         if (coin) {
@@ -186,6 +192,7 @@ html_content = """<!DOCTYPE html>
                                     maxGain: maxGain.toFixed(2), 
                                     reason: expireReason,
                                     timestamp: now, 
+                                    date: new Date().toISOString().slice(0, 7), // 記錄年月 YYYY-MM
                                     timeStr: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
                                 };
                                 delete activeSignals[sym];
@@ -193,10 +200,10 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 篩選與捕捉 Top 8
+                    // 篩選 Top 10
                     let top50Pool = globalData.slice(0, 50);
                     let qualifiedCoins = top50Pool.filter(coin => coin.change24h >= 3.0 && !expiredSignals[coin.symbol]);
-                    let selectedCoins = qualifiedCoins.slice(0, 8);
+                    let selectedCoins = qualifiedCoins.slice(0, 10);
                     let selectedSymbols = selectedCoins.map(c => c.symbol);
 
                     Object.keys(activeSignals).forEach(sym => {
@@ -233,13 +240,13 @@ html_content = """<!DOCTYPE html>
                     });
 
                     let activeKeys = Object.keys(activeSignals);
-                    if (activeKeys.length > 8) {
+                    if (activeKeys.length > 10) {
                         activeKeys.sort((a, b) => {
                             let cA = globalData.find(c => c.symbol === a)?.change24h || 0;
                             let cB = globalData.find(c => c.symbol === b)?.change24h || 0;
                             return cB - cA;
                         });
-                        for (let i = 8; i < activeKeys.length; i++) {
+                        for (let i = 10; i < activeKeys.length; i++) {
                             delete activeSignals[activeKeys[i]];
                         }
                     }
@@ -262,15 +269,10 @@ html_content = """<!DOCTYPE html>
             return "⭐ (保守觀望)";
         }
 
-        function toggleCard(cardElement) { cardElement.classList.toggle('expanded'); }
-
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
             if (activeKeys.length === 0) {
-                // 如果快取裡剛好沒有，顯示正在掃描但不清空版面
-                if (Object.keys(activeSignals).length === 0) {
-                    activeHtml = '<div class="loading">正在掃描 BingX 市場數據，請稍候...</div>';
-                }
+                activeHtml = '<div class="loading">正在掃描 BingX 市場數據，請稍候...</div>';
             } else {
                 activeKeys.sort((a, b) => {
                     let coinA = globalData.find(c => c.symbol === a) || {change24h: 0, lastPrice: 0};
@@ -298,7 +300,7 @@ html_content = """<!DOCTYPE html>
                     let repeatBadge = count >= 2 ? `<span class="badge-repeat">⚠️ 第 ${count} 次警報</span>` : '';
 
                     activeHtml += `
-                        <div class="card" onclick="toggleCard(this)">
+                        <div class="card">
                             <div class="row" style="margin-bottom: 6px;">
                                 <div>
                                     <span class="badge-active">🚀 飆漲動能 · 24h: +${coinData.change24h.toFixed(2)}%</span>
@@ -324,9 +326,7 @@ html_content = """<!DOCTYPE html>
                         </div>`;
                 });
             }
-            if(activeHtml) {
-                document.getElementById('market-feed').innerHTML = activeHtml;
-            }
+            document.getElementById('market-feed').innerHTML = activeHtml;
 
             let expiredHtml = '', expiredKeys = Object.keys(expiredSignals);
             if (expiredKeys.length === 0) expiredHtml = '<div class="loading">目前尚無回檔失效標的</div>';
@@ -349,7 +349,53 @@ html_content = """<!DOCTYPE html>
             document.getElementById('expired-feed').innerHTML = expiredHtml;
         }
 
-        // 頁面打開立刻抓取一次，之後每 10 秒自動更新
+        // 渲染每月覆盤統計分頁
+        function renderMonthlyStats() {
+            let monthsData = {};
+            // 結合 activeSignals 與 expiredSignals 進行統計
+            let allItems = Object.assign({}, activeSignals, expiredSignals);
+            
+            Object.keys(allItems).forEach(k => {
+                let item = allItems[k];
+                let m = item.date || new Date().toISOString().slice(0, 7); // 預設當月
+                if (!monthsData[m]) {
+                    monthsData[m] = { total: 0, p100: 0, p50_100: 0, p20_50: 0, p10_20: 0, stopLoss: 0 };
+                }
+                monthsData[m].total += 1;
+                let maxG = parseFloat(item.maxGain || 0);
+                if (item.reason && item.reason.includes("止損")) {
+                    monthsData[m].stopLoss += 1;
+                }
+                if (maxG >= 100) monthsData[m].p100 += 1;
+                else if (maxG >= 50) monthsData[m].p50_100 += 1;
+                else if (maxG >= 20) monthsData[m].p20_50 += 1;
+                else if (maxG >= 10) monthsData[m].p10_20 += 1;
+            });
+
+            let html = '';
+            let sortedMonths = Object.keys(monthsData).sort().reverse();
+            if (sortedMonths.length === 0) {
+                html = '<div class="loading">目前尚無足夠的統計數據...</div>';
+            } else {
+                sortedMonths.forEach(m => {
+                    let d = monthsData[m];
+                    html += `
+                        <div class="monthly-card">
+                            <div class="monthly-title">📅 統計月份：${m}</div>
+                            <div class="metrics-grid" style="grid-template-columns: 1fr;">
+                                <div>📌 總警報數：<b>${d.total} 個</b></div>
+                                <div>🚀 盈利 > 100%：<b class="positive">${d.p100} 個</b></div>
+                                <div>📈 盈利 50% - 100%：<b class="positive">${d.p50_100} 個</b></div>
+                                <div>📊 盈利 20% - 50%：<b class="positive">${d.p20_50} 個</b></div>
+                                <div>⭐ 盈利 10% - 20%：<b class="positive">${d.p10_20} 個</b></div>
+                                <div>🛑 止損 (-2%)：<b class="negative">${d.stopLoss} 個</b></div>
+                            </div>
+                        </div>`;
+                });
+            }
+            document.getElementById('monthly-feed').innerHTML = html;
+        }
+
         fetchBingXData(); 
         setInterval(fetchBingXData, 10000);
     </script>
@@ -379,5 +425,5 @@ if __name__ == "__main__":
 
   socketserver.TCPServer.allow_reuse_address = True
   with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-    print(f"🚀 BingX 8強自動更新追蹤伺服器已在 Port {PORT} 啟動！")
+    print(f"🚀 BingX 10強與覆盤追蹤伺服器已在 Port {PORT} 啟動！")
     httpd.serve_forever()
