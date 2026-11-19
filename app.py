@@ -47,7 +47,7 @@ html_content = """<!DOCTYPE html>
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>BingX 漲幅榜前 100 強噴發追蹤系統</title>
+    <title>BingX 前100名起漲噴發追蹤系統</title>
     <style>
         :root {
             --bg: #0b0e11;
@@ -90,23 +90,23 @@ html_content = """<!DOCTYPE html>
 </head>
 <body>
     <div class="gauge-card">
-        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 漲幅榜前 100 強噴發追蹤系統 (最多 10 檔)</div>
-        <div class="gauge-score">高潛力噴發掃描中</div>
+        <div style="font-size: 0.8rem; color: var(--text-sub);">📊 BingX 前 100 名起漲噴發追蹤系統 (最多 10 檔)</div>
+        <div class="gauge-score">正要噴發標的掃描中</div>
         <div style="font-size: 0.78rem; color: var(--green); margin-top: 4px;">🟢 止損 -2% · 正盈利回檔 10% 移至失效區</div>
         <div class="sync-status" id="sync-status">同步狀態：正在連線...</div>
     </div>
     <div class="tab-container">
-        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 噴發動能追蹤 (Top 10)</div>
+        <div class="tab-btn active" id="tab-tracking" onclick="switchView('tracking')">📈 起漲噴發追蹤 (Top 10)</div>
         <div class="tab-btn" id="tab-expired" onclick="switchView('expired')">⚠️ 已失效 / 迴避</div>
         <div class="tab-btn" id="tab-monthly" onclick="switchView('monthly')">📊 每月覆盤統計</div>
     </div>
-    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在從前 100 大漲幅榜篩選高噴發標的...</div></div></div>
+    <div id="view-tracking" class="view-section active-view"><div id="market-feed"><div class="loading">正在從漲幅榜前 100 名篩選正要噴發的幣種...</div></div></div>
     <div id="view-expired" class="view-section"><div id="expired-feed"><div class="loading">目前尚無回檔失效標的...</div></div></div>
     <div id="view-monthly" class="view-section"><div id="monthly-feed"><div class="loading">正在統計每月表現...</div></div></div>
     <script>
         let globalData = [], globalFundingRate = {}, activeSignals = {}, expiredSignals = {}, alertCounts = {}, currentTab = 'tracking';
         let isFetching = false;
-        const STORAGE_KEY = 'bingx_top100_v1', EXPIRED_KEY = 'bingx_top100_expired_v1', COUNTS_KEY = 'bingx_top100_counts_v1';
+        const STORAGE_KEY = 'bingx_prepump_v1', EXPIRED_KEY = 'bingx_prepump_expired_v1', COUNTS_KEY = 'bingx_prepump_counts_v1';
 
         function switchView(tabName) {
             currentTab = tabName;
@@ -135,17 +135,25 @@ html_content = """<!DOCTYPE html>
             localStorage.setItem(COUNTS_KEY, JSON.stringify(alertCounts));
         }
 
-        function getBurstScore(coin, diffPct, fundingRate) {
+        // 針對「正要噴發」計算分數：看即時追蹤動能與資金費率，避免只追 24h 已經暴漲很多的幣
+        function getPrePumpScore(coin, diffPct, fundingRate) {
             let momentum = parseFloat(diffPct || 0);
-            let fundingBonus = fundingRate < 0 ? Math.abs(fundingRate) * 2 : (fundingRate > 0.1 ? -1 : 0.5);
-            return (coin.change24h * 0.45) + (momentum * 0.45) + fundingBonus;
+            // 24h 漲幅若在 3%~25% 給予起漲加分；超過 35% 則扣分，避免抓到已經噴很高的尾盤
+            let earlyStageBonus = 0;
+            if (coin.change24h >= 3 && coin.change24h <= 25) {
+                earlyStageBonus = 6;
+            } else if (coin.change24h > 35) {
+                earlyStageBonus = -5;
+            }
+            let fundingBonus = fundingRate < 0 ? Math.abs(fundingRate) * 2.5 : (fundingRate > 0.12 ? -1.5 : 0.5);
+            return (momentum * 1.4) + earlyStageBonus + fundingBonus + (coin.change24h * 0.15);
         }
 
         function getRecommendationStars(score) {
-            if (score >= 16) return "⭐⭐⭐⭐⭐ (極高噴發)";
-            if (score >= 10) return "⭐⭐⭐⭐ (強勢噴發)";
-            if (score >= 5)  return "⭐⭐⭐ (動能轉強)";
-            if (score >= 1)  return "⭐⭐ (溫和偏多)";
+            if (score >= 12) return "⭐⭐⭐⭐⭐ (起漲爆發)";
+            if (score >= 8)  return "⭐⭐⭐⭐ (動能加速)";
+            if (score >= 4)  return "⭐⭐⭐ (蓄勢待發)";
+            if (score >= 1)  return "⭐⭐ (輕度轉強)";
             return "⭐ (觀察中)";
         }
 
@@ -166,7 +174,6 @@ html_content = """<!DOCTYPE html>
             if (isFetching && !force) return;
             isFetching = true;
             try {
-                // 加上時間戳記與 no-store 避免瀏覽器或代理快取舊資料
                 const res = await fetch(`/api/bingx?_=${Date.now()}`, {
                     cache: 'no-store',
                     headers: { 'Cache-Control': 'no-cache' }
@@ -242,16 +249,17 @@ html_content = """<!DOCTYPE html>
                         }
                     });
 
-                    // 2. 鎖定漲幅榜前 100 名，挑出最有機會噴發的幣種（最多 10 檔，寧缺勿濫）
+                    // 2. 從漲幅榜前 100 名中抓「正要噴發」的幣種（漲幅 >= 3% 且優先挑選剛起漲階段）
                     let top100Pool = globalData.slice(0, 100);
                     let qualifiedCoins = top100Pool
                         .filter(coin => coin.change24h >= 3.0 && !expiredSignals[coin.symbol])
                         .map(coin => {
                             let fr = globalFundingRate[coin.symbol] !== undefined ? globalFundingRate[coin.symbol] : 0.01;
-                            let burstScore = getBurstScore(coin, coin.change24h * 0.25, fr);
-                            return { coin, burstScore };
+                            let estMomentum = Math.max(0.2, coin.change24h * 0.12);
+                            let score = getPrePumpScore(coin, estMomentum, fr);
+                            return { coin, score };
                         })
-                        .sort((a, b) => b.burstScore - a.burstScore);
+                        .sort((a, b) => b.score - a.score);
 
                     let selectedCoins = qualifiedCoins.slice(0, 10).map(x => x.coin);
                     let selectedSymbols = selectedCoins.map(c => c.symbol);
@@ -273,8 +281,7 @@ html_content = """<!DOCTYPE html>
                                 alertCounts[sym].lastTime = now;
                             }
 
-                            // 初次捕捉時同步起跑動能，避免剛進入顯示 0.00%
-                            let syncedInitGain = Math.max(0.15, parseFloat((coin.change24h * 0.1).toFixed(2)));
+                            let syncedInitGain = Math.max(0.2, parseFloat((coin.change24h * 0.12).toFixed(2)));
                             activeSignals[sym] = {
                                 symbol: sym,
                                 firstAlertPrice: coin.lastPrice,
@@ -296,7 +303,7 @@ html_content = """<!DOCTYPE html>
                             let cB = globalData.find(c => c.symbol === b) || { change24h: 0, lastPrice: 1 };
                             let diffA = ((cA.lastPrice - activeSignals[a].firstAlertPrice) / activeSignals[a].firstAlertPrice) * 100;
                             let diffB = ((cB.lastPrice - activeSignals[b].firstAlertPrice) / activeSignals[b].firstAlertPrice) * 100;
-                            return getBurstScore(cB, diffB, globalFundingRate[b] || 0) - getBurstScore(cA, diffA, globalFundingRate[a] || 0);
+                            return getPrePumpScore(cB, diffB, globalFundingRate[b] || 0) - getPrePumpScore(cA, diffA, globalFundingRate[a] || 0);
                         });
                         for (let i = 10; i < activeKeys.length; i++) {
                             delete activeSignals[activeKeys[i]];
@@ -320,9 +327,8 @@ html_content = """<!DOCTYPE html>
         function renderView() {
             let activeHtml = '', activeKeys = Object.keys(activeSignals);
             if (activeKeys.length === 0) {
-                activeHtml = '<div class="loading">正在從前 100 大漲幅榜掃描高噴發標的，請稍候...</div>';
+                activeHtml = '<div class="loading">正在從前 100 大漲幅榜掃描正要噴發的標的，請稍候...</div>';
             } else {
-                // 4-5 星強勢標的優先置頂排序
                 activeKeys.sort((a, b) => {
                     let coinA = globalData.find(c => c.symbol === a) || { change24h: parseFloat(activeSignals[a].score || 0), lastPrice: activeSignals[a].firstAlertPrice };
                     let coinB = globalData.find(c => c.symbol === b) || { change24h: parseFloat(activeSignals[b].score || 0), lastPrice: activeSignals[b].firstAlertPrice };
@@ -330,9 +336,9 @@ html_content = """<!DOCTYPE html>
                     let pB = parseFloat(activeSignals[b].firstAlertPrice) || 1;
                     let rawDiffA = ((coinA.lastPrice - pA) / pA) * 100;
                     let rawDiffB = ((coinB.lastPrice - pB) / pB) * 100;
-                    let effDiffA = Math.abs(rawDiffA) < 0.01 ? (activeSignals[a].initialMomentum || 0.15) : rawDiffA;
-                    let effDiffB = Math.abs(rawDiffB) < 0.01 ? (activeSignals[b].initialMomentum || 0.15) : rawDiffB;
-                    return getBurstScore(coinB, effDiffB, globalFundingRate[b] || 0) - getBurstScore(coinA, effDiffA, globalFundingRate[a] || 0);
+                    let effDiffA = Math.abs(rawDiffA) < 0.01 ? (activeSignals[a].initialMomentum || 0.2) : rawDiffA;
+                    let effDiffB = Math.abs(rawDiffB) < 0.01 ? (activeSignals[b].initialMomentum || 0.2) : rawDiffB;
+                    return getPrePumpScore(coinB, effDiffB, globalFundingRate[b] || 0) - getPrePumpScore(coinA, effDiffA, globalFundingRate[a] || 0);
                 });
 
                 activeKeys.forEach(k => {
@@ -341,7 +347,7 @@ html_content = """<!DOCTYPE html>
                     let currentPrice = parseFloat(coinData.lastPrice);
                     let firstAlert = parseFloat(sig.firstAlertPrice);
                     let rawDiff = ((currentPrice - firstAlert) / firstAlert) * 100;
-                    let diffVal = Math.abs(rawDiff) < 0.01 ? parseFloat(sig.initialMomentum || 0.15) : rawDiff;
+                    let diffVal = Math.abs(rawDiff) < 0.01 ? parseFloat(sig.initialMomentum || 0.2) : rawDiff;
                     let diffPct = diffVal.toFixed(2);
                     let isDiffPos = diffVal >= 0;
 
@@ -351,8 +357,8 @@ html_content = """<!DOCTYPE html>
                     let fundingRate = frVal.toFixed(4);
                     let isFundingPos = frVal >= 0;
 
-                    let burstScore = getBurstScore(coinData, diffPct, frVal);
-                    let stars = getRecommendationStars(burstScore);
+                    let score = getPrePumpScore(coinData, diffPct, frVal);
+                    let stars = getRecommendationStars(score);
                     let count = sig.alertCount || 1;
                     let repeatBadge = count >= 2 ? `<span class="badge-repeat">⚠️ 第 ${count} 次警報</span>` : '';
                     let displayMaxGain = Math.max(parseFloat(sig.maxGain || 0), diffVal).toFixed(2);
@@ -361,7 +367,7 @@ html_content = """<!DOCTYPE html>
                         <div class="card">
                             <div class="row" style="margin-bottom: 6px;">
                                 <div>
-                                    <span class="badge-active">🚀 前100噴發 · 24h: +${coinData.change24h.toFixed(2)}%</span>
+                                    <span class="badge-active">🚀 前100起漲 · 24h: +${coinData.change24h.toFixed(2)}%</span>
                                     ${repeatBadge}
                                 </div>
                                 <span class="rating-stars">${stars}</span>
@@ -452,7 +458,6 @@ html_content = """<!DOCTYPE html>
             document.getElementById('monthly-feed').innerHTML = html;
         }
 
-        // 每次點進瀏覽器、切回分頁或從上一頁返回時，立刻強制同步最新資料
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) fetchBingXData(true);
         });
@@ -491,5 +496,5 @@ if __name__ == "__main__":
 
   socketserver.TCPServer.allow_reuse_address = True
   with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-    print(f"🚀 BingX 前100強噴發追蹤伺服器已在 Port {PORT} 啟動！")
+    print(f"🚀 BingX 前100名起漲噴發追蹤伺服器已在 Port {PORT} 啟動！")
     httpd.serve_forever()
